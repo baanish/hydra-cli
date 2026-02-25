@@ -1,0 +1,49 @@
+{
+  "name": "hydra-swarm",
+  "version": "0.1.0",
+  "description": "Multi-model swarm intelligence engine for your terminal",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/baanish/hydra-cli.git"
+  },
+  "type": "module",
+  "bin": {
+    "hydra": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "build": "bun build src/index.ts --compile --outfile dist/hydra",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/",
+    "format": "biome format --write src/"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.81",
+    "commander": "^13.1.0",
+    "nanoid": "^5.1.5",
+    "openai": "^4.83.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/bun": "latest",
+    "typescript": "^5.7.3"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "swarm",
+    "multi-agent",
+    "research",
+    "intelligence",
+    "llm",
+    "tui",
+    "opentui"
+  ],
+  "author": "Aanish Bhirud",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.1.0"
+  }
+}

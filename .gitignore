@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.db
+hydra.db
+*.sqlite
+.env
+.env.local
+.DS_Store
+**/.DS_Store
+TODO*.md
+TODO-*.md
+SPEC.md
+*.tsbuildinfo
+coverage/
+.turbo/
+AGENTS.md

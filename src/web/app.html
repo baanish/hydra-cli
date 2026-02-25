@@ -1,0 +1,1330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hydra web</title>
+    <style>
+      :root {
+        --bg: #f6efd9;
+        --paper: #fff8e7;
+        --fg: #131313;
+        --muted: #3f3b36;
+        --surface: #fff6df;
+        --surface-soft: #eee4cb;
+        --surface-stroke: #3a3830;
+        --shadow: #121212;
+        --ink: #0f0f0f;
+        --ink-fg: #fff8e7;
+        --accent: #f24a2b;
+        --accent-muted: #d03e23;
+        --accent-fg: #fff9f0;
+        --signal: #ffdd35;
+        --cobalt: #1046e6;
+        --ring: #1046e6;
+      }
+
+      .dark {
+        --bg: #131313;
+        --paper: #1a1a1a;
+        --fg: #f6efd9;
+        --muted: #a8a090;
+        --surface: #1e1e1e;
+        --surface-soft: #2a2a2a;
+        --surface-stroke: #3a3830;
+        --shadow: #3a3830;
+        --ink: #f6efd9;
+        --ink-fg: #131313;
+        --accent: #f24a2b;
+        --accent-muted: #ff6347;
+        --accent-fg: #131313;
+        --signal: #b8960a;
+        --cobalt: #3a6aff;
+        --ring: #4a7aff;
+      }
+
+      * {
+        box-sizing: border-box;
+        border-radius: 0 !important;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        font-family: Arial, system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        background-image: repeating-linear-gradient(0deg, transparent 0px, transparent 7px, rgba(0, 0, 0, 0.07) 8px);
+      }
+
+      #app {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 32px 20px 24px;
+      }
+
+      header {
+        background: var(--ink);
+        color: var(--ink-fg);
+        border: 4px solid var(--surface-stroke);
+        border-bottom: 0;
+        padding: 16px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .logo {
+        margin: 0;
+        background: var(--accent);
+        color: var(--accent-fg);
+        border: 4px solid var(--surface-stroke);
+        padding: 4px 14px;
+        font-size: 13px;
+        font-weight: 900;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        box-shadow: 4px 4px 0 var(--shadow);
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .ticker {
+        border-top: 4px solid var(--surface-stroke);
+        border-bottom: 4px solid var(--surface-stroke);
+        background: var(--signal);
+        color: var(--fg);
+        overflow: hidden;
+        white-space: nowrap;
+        padding: 6px 0;
+      }
+
+      .ticker-track {
+        display: inline-flex;
+        min-width: max-content;
+        gap: 2.5rem;
+        padding-left: 20px;
+        padding-right: 2.5rem;
+        animation: ticker 34s linear infinite;
+      }
+
+      .ticker span {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        text-transform: uppercase;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+      }
+
+      .btn,
+      .btn:link,
+      .btn:visited {
+        background: var(--ink);
+        color: var(--ink-fg);
+        border: 3px solid var(--surface-stroke);
+        padding: 8px 18px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+        box-shadow: 3px 3px 0 var(--shadow);
+        transition: transform 0.1s, box-shadow 0.1s;
+      }
+
+      .btn:hover {
+        transform: translate(-1px, -1px);
+        box-shadow: 4px 4px 0 var(--shadow);
+      }
+
+      .btn:active {
+        transform: translate(1px, 1px);
+      }
+
+      .btn-accent {
+        background: var(--accent);
+        color: var(--accent-fg);
+      }
+
+      .btn-cobalt {
+        background: var(--cobalt);
+        color: white;
+      }
+
+      .panel,
+      .card,
+      .run-card,
+      .modal-card {
+        background: var(--paper);
+        border: 2px solid var(--surface-stroke);
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 4px 4px 0 var(--shadow);
+      }
+
+      #run-modal {
+        position: fixed;
+        inset: 0;
+        display: none;
+        background: rgba(0, 0, 0, 0.35);
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        z-index: 10;
+      }
+
+      #run-modal.open {
+        display: flex;
+      }
+
+      .modal-card {
+        width: min(700px, 92vw);
+      }
+
+      textarea,
+      input,
+      select {
+        width: 100%;
+        margin-top: 6px;
+        background: var(--surface);
+        color: var(--fg);
+        border: 2px solid var(--surface-stroke);
+        padding: 10px 12px;
+        font-size: 14px;
+        outline: none;
+      }
+
+      textarea {
+        min-height: 120px;
+      }
+
+      input:focus,
+      textarea:focus,
+      select:focus {
+        box-shadow: 3px 3px 0 var(--ring);
+        border-color: var(--ring);
+      }
+
+      input[type="range"] {
+        accent-color: var(--cobalt);
+        padding: 0;
+      }
+
+      label {
+        display: block;
+        margin-top: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .small,
+      .meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .status,
+      .badge {
+        display: inline-block;
+        border: 2px solid var(--surface-stroke);
+        padding: 2px 8px;
+        margin-right: 8px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .badge-complete {
+        background: var(--signal);
+        color: var(--fg);
+      }
+
+      .badge-error {
+        background: var(--accent);
+        color: var(--accent-fg);
+      }
+
+      .badge-running,
+      .badge-researching,
+      .badge-decomposing,
+      .badge-debate,
+      .badge-debating,
+      .badge-synthesizing {
+        background: var(--surface-soft);
+        color: var(--fg);
+      }
+
+      .progress-bar {
+        margin: 8px 0;
+        width: 100%;
+        background: var(--surface-soft);
+        border: 2px solid var(--surface-stroke);
+        overflow: hidden;
+        height: 20px;
+      }
+
+      .progress-bar span {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        transition: width 0.3s;
+      }
+
+      .progress-bar span.indeterminate {
+        animation: progress-indeterminate 1.2s ease-in-out infinite;
+        background: linear-gradient(90deg, var(--accent), var(--accent-muted), var(--accent));
+      }
+
+      @keyframes progress-indeterminate {
+        0% {
+          transform: translateX(-100%);
+        }
+        50% {
+          transform: translateX(-10%);
+        }
+        100% {
+          transform: translateX(100%);
+        }
+      }
+
+      details {
+        border: 2px solid var(--surface-stroke);
+        padding: 8px;
+        margin-bottom: 6px;
+      }
+
+      summary {
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      a {
+        color: var(--fg);
+        text-decoration: none;
+      }
+
+      pre,
+      .transcript-output,
+      #brief {
+        background: var(--surface);
+        border: 2px solid var(--surface-stroke);
+        padding: 10px;
+        overflow: auto;
+        margin-top: 8px;
+      }
+
+      .transcript-output {
+        white-space: normal;
+      }
+
+      #brief {
+        white-space: pre-wrap;
+      }
+
+      #run-status {
+        margin-top: 10px;
+      }
+
+      .row {
+        margin-top: 10px;
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+
+      .run-card {
+        padding: 12px;
+      }
+
+      .run-card h2 {
+        margin: 0;
+        font-size: 14px;
+      }
+
+      a .run-card {
+        display: block;
+      }
+
+      .ticker {
+        border-top: 4px solid var(--surface-stroke);
+        border-bottom: 4px solid var(--surface-stroke);
+        background: var(--signal);
+        color: var(--fg);
+        overflow: hidden;
+        white-space: nowrap;
+        padding: 6px 0;
+      }
+
+      .ticker-track {
+        display: inline-flex;
+        min-width: max-content;
+        gap: 2.5rem;
+        padding-left: 20px;
+        padding-right: 2.5rem;
+        animation: ticker-scroll 34s linear infinite;
+      }
+
+      .ticker span {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      @keyframes ticker-scroll {
+        from {
+          transform: translateX(0);
+        }
+        to {
+          transform: translateX(-50%);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="run-modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="run-modal-title">
+      <div class="modal-card">
+        <h1 id="run-modal-title" class="logo">new run</h1>
+        <form id="run-form">
+          <label>
+            query
+            <textarea id="run-query" placeholder="ask a question"></textarea>
+          </label>
+          <label>
+            agents <span id="agent-count">5</span>
+            <input id="run-agents" type="range" min="1" max="20" value="5" />
+          </label>
+          <label>
+            <input id="run-search" type="checkbox" checked /> enable search
+          </label>
+          <div id="run-status" class="small"></div>
+          <div class="row">
+            <button class="btn" type="button" id="run-close">cancel</button>
+            <button class="btn" type="submit">start run</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const state = {
+        runs: [],
+        run: null,
+        runId: null,
+        currentPhase: "decompose",
+        progress: {
+          completed: 0,
+          total: 0,
+        },
+        agentCount: 0,
+        phases: {
+          decompose: { completed: 0, total: 0 },
+          research: { completed: 0, total: 0 },
+          debate: { completed: 0, total: 0 },
+          synthesis: { completed: 0, total: 0 },
+        },
+        transcripts: [],
+        source: null,
+      };
+      let routeEpoch = 0;
+
+      const app = document.getElementById("app");
+      const modal = document.getElementById("run-modal");
+      const runForm = document.getElementById("run-form");
+      const runQuery = document.getElementById("run-query");
+      const runAgents = document.getElementById("run-agents");
+      const runSearch = document.getElementById("run-search");
+      const agentCountLabel = document.getElementById("agent-count");
+      const runStatus = document.getElementById("run-status");
+      const runClose = document.getElementById("run-close");
+      let defaultAgentCount = Number(runAgents.value);
+      let defaultSearchEnabled = runSearch.checked;
+      let agentCountTouched = false;
+      let searchTouched = false;
+      const THEME_STORAGE_KEY = "hydra-web-theme";
+      const DEFAULT_PHASE = "decompose";
+      let runModalOpener = null;
+      let runModalKeydownHandler = null;
+
+      function setRunModalOpen(isOpen, opener = null) {
+        runModalOpener = isOpen ? opener : runModalOpener;
+        modal.setAttribute("aria-hidden", isOpen ? "false" : "true");
+        modal.classList.toggle("open", isOpen);
+
+        if (isOpen) {
+          runQuery.focus();
+          if (runModalKeydownHandler) {
+            return;
+          }
+          runModalKeydownHandler = (event) => {
+            if (event.key !== "Tab") {
+              return;
+            }
+            const focusables = [
+              runQuery,
+              runAgents,
+              runSearch,
+              runClose,
+              runForm.querySelector('button[type="submit"]'),
+            ].filter(
+              (element) =>
+                element instanceof HTMLElement &&
+                !element.disabled &&
+                element.tabIndex >= 0,
+            );
+            if (focusables.length === 0) {
+              return;
+            }
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            const active = document.activeElement;
+            if (event.shiftKey) {
+              if (active === first) {
+                event.preventDefault();
+                last.focus();
+              }
+              return;
+            }
+            if (active === last) {
+              event.preventDefault();
+              first.focus();
+            }
+          };
+          modal.addEventListener("keydown", runModalKeydownHandler);
+          return;
+        }
+
+        if (runModalKeydownHandler) {
+          modal.removeEventListener("keydown", runModalKeydownHandler);
+          runModalKeydownHandler = null;
+        }
+        if (runModalOpener instanceof HTMLElement) {
+          runModalOpener.focus();
+        }
+        runModalOpener = null;
+      }
+
+      function getSavedTheme() {
+        try {
+          return localStorage.getItem(THEME_STORAGE_KEY);
+        } catch {
+          return null;
+        }
+      }
+
+      function updateThemeToggleLabels() {
+        const isDark = document.documentElement.classList.contains("dark");
+        const label = isDark ? "LIGHT MODE" : "DARK MODE";
+        document.querySelectorAll(".theme-toggle").forEach((button) => {
+          button.textContent = label;
+        });
+      }
+
+      function applyTheme(theme) {
+        const isDark = theme === "dark";
+        document.documentElement.classList.toggle("dark", isDark);
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, isDark ? "dark" : "light");
+        } catch {
+          // ignore localStorage failures in restricted environments.
+        }
+        updateThemeToggleLabels();
+      }
+
+      function initializeTheme() {
+        const savedTheme = getSavedTheme();
+        const preferred = savedTheme === "dark" || savedTheme === "light" ? savedTheme : "light";
+        applyTheme(preferred);
+      }
+
+      function statusToPhase(status, fallbackPhase = null) {
+        switch (String(status ?? "")) {
+          case "decomposing":
+            return "decompose";
+          case "researching":
+            return "research";
+          case "debating":
+            return "debate";
+          case "synthesizing":
+            return "synthesis";
+          case "complete":
+          case "error":
+            return fallbackPhase || "synthesis";
+          default:
+            return state.currentPhase || DEFAULT_PHASE;
+        }
+      }
+
+      function clampAgentCount(value) {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          return null;
+        }
+        return Math.min(20, Math.max(1, parsed));
+      }
+
+      async function loadRunDefaults() {
+        try {
+          const response = await fetch("/api/config");
+          if (!response.ok) {
+            return;
+          }
+          const config = await response.json();
+          const parsedAgentCount = clampAgentCount(config?.defaultAgentCount);
+          if (parsedAgentCount !== null) {
+            defaultAgentCount = parsedAgentCount;
+          }
+          if (typeof config?.searchEnabled === "boolean") {
+            defaultSearchEnabled = config.searchEnabled;
+          }
+        } catch {
+          return;
+        }
+
+        runAgents.value = String(defaultAgentCount);
+        agentCountLabel.textContent = runAgents.value;
+        runSearch.checked = defaultSearchEnabled;
+        agentCountTouched = false;
+        searchTouched = false;
+      }
+
+      function parseRunApiErrorText(response, fallback = "failed to start run") {
+        return (async () => {
+          const contentType = response.headers.get("content-type") ?? "";
+          if (contentType.includes("application/json")) {
+            try {
+              const payload = await response.json();
+              if (payload && typeof payload.error === "string" && payload.error) {
+                return payload.error;
+              }
+            } catch {
+              // ignore JSON parse failures and fallback below.
+            }
+          }
+
+          try {
+            const raw = await response.text();
+            const trimmed = raw.trim();
+            if (trimmed) {
+              return trimmed;
+            }
+          } catch {
+            // ignore fallback parsing failures.
+          }
+
+          return fallback;
+        })();
+      }
+
+      function toggleTheme() {
+        const isDark = document.documentElement.classList.contains("dark");
+        applyTheme(isDark ? "light" : "dark");
+      }
+
+      function normalizeStatusClass(status) {
+        return String(status ?? "unknown")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-");
+      }
+
+      function renderTicker() {
+        const track = [
+          "HYDRA SWARM INTELLIGENCE ENGINE",
+          "MULTI-MODEL DEBATE",
+          "SYNTHETIC SEARCH",
+          "LOCAL + PRIVATE",
+          "HYDRA SWARM INTELLIGENCE ENGINE",
+          "MULTI-MODEL DEBATE",
+          "SYNTHETIC SEARCH",
+          "LOCAL + PRIVATE",
+        ]
+          .map((item) => `<span>${item}</span>`)
+          .join("");
+        return `
+          <div class="ticker">
+            <div class="ticker-track">${track}${track}</div>
+          </div>
+        `;
+      }
+
+      function safeJson(raw) {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (char) => {
+          return {
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[char];
+        });
+      }
+
+      function inlineMarkup(text) {
+        const escaped = escapeHtml(text);
+        const bolded = escaped.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+        return bolded.replace(
+          /(https?:\/\/[\w./?#%&=+:;,_-]+)/g,
+          '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>',
+        );
+      }
+
+      function truncateText(value, maxLength) {
+        const normalized = String(value ?? "");
+        if (normalized.length <= maxLength) {
+          return escapeHtml(normalized);
+        }
+        return `${escapeHtml(normalized.slice(0, maxLength - 1))}…`;
+      }
+
+      function renderMarkdown(text) {
+        const normalized = String(text ?? "").replace(/\r\n/g, "\n").split("\n");
+        let html = "";
+        let inCode = false;
+        let listOpen = false;
+        let para = [];
+
+        const flushParagraph = () => {
+          if (para.length === 0) {
+            return;
+          }
+          html += `<p>${para.join("<br>")}</p>`;
+          para = [];
+        };
+
+        const flushList = () => {
+          if (listOpen) {
+            html += "</ul>";
+            listOpen = false;
+          }
+        };
+
+        for (const line of normalized) {
+          if (line.startsWith("```")) {
+            flushParagraph();
+            flushList();
+            if (!inCode) {
+              html += "<pre><code>";
+            } else {
+              html += "</code></pre>";
+            }
+            inCode = !inCode;
+            continue;
+          }
+
+          if (inCode) {
+            html += `${escapeHtml(line)}\n`;
+            continue;
+          }
+
+          const heading = line.match(/^##\s+(.*)$/);
+          if (heading) {
+            flushParagraph();
+            flushList();
+            html += `<h2>${escapeHtml(heading[1])}</h2>`;
+            continue;
+          }
+
+          if (line.startsWith("- ")) {
+            if (!listOpen) {
+              flushParagraph();
+              html += "<ul>";
+              listOpen = true;
+            }
+            html += `<li>${inlineMarkup(line.slice(2))}</li>`;
+            continue;
+          }
+
+          if (!line.trim()) {
+            flushParagraph();
+            flushList();
+            continue;
+          }
+
+          para.push(inlineMarkup(line));
+        }
+
+        flushParagraph();
+        flushList();
+        if (inCode) {
+          html += "</code></pre>";
+        }
+
+        return html || "<p>no content</p>";
+      }
+
+      function elapsedSince(ts) {
+        const delta = Math.max(0, Date.now() - (ts || Date.now()));
+        const mins = Math.floor(delta / 60000);
+        const secs = Math.floor((delta % 60000) / 1000);
+        return mins > 0 ? `${mins}m ${String(secs).padStart(2, "0")}s` : `${secs}s`;
+      }
+
+      function statusBadge(status) {
+        const normalized = normalizeStatusClass(status);
+        return `<span class="status badge-${normalized}">${escapeHtml(status)}</span>`;
+      }
+
+      function progressBar(completed, total, indeterminate = false) {
+        const safeTotal = Math.max(1, total || 0);
+        const safeCompleted = indeterminate ? safeTotal : Math.max(0, Math.min(completed || 0, safeTotal));
+        const pct = Math.min(100, Math.round((safeCompleted / safeTotal) * 100));
+        const barClass = indeterminate ? " indeterminate" : "";
+        return `
+          <div class="progress-bar">
+            <span class="${barClass}" style="width:${pct}%"></span>
+          </div>
+          <div class="small">${indeterminate ? "synthesizing..." : `${safeCompleted}/${safeTotal} agents`}</div>
+        `;
+      }
+
+      function renderPhaseProgress() {
+        const phase = state.currentPhase || DEFAULT_PHASE;
+        if (phase === "synthesis") {
+          const total = state.phases.synthesis.total || state.progress.total || state.agentCount || 0;
+          const terminalRun = state.run?.run?.status === "complete" || state.run?.run?.status === "error";
+          return progressBar(total, total, !terminalRun);
+        }
+        const details = state.phases[phase] || null;
+        if (details) {
+          return progressBar(details.completed, details.total);
+        }
+        return progressBar(state.progress.completed, state.progress.total);
+      }
+
+      function renderDashboard() {
+        const cards = state.runs
+          .map((run) => {
+            const snippet = truncateText(run.query, 80);
+            const elapsed = run.elapsedMs != null ? elapsedSince(Date.now() - run.elapsedMs) : "running";
+            return `
+              <a href="#/runs/${encodeURIComponent(run.id)}">
+                <div class="run-card">
+                  <h2>${snippet}</h2>
+                  <div class="small">
+                    ${escapeHtml(run.id)} ${statusBadge(run.status)} · elapsed: ${elapsed}
+                  </div>
+                </div>
+              </a>
+            `;
+          })
+          .join("");
+
+        app.innerHTML = `
+          <header>
+            <h1 class="logo">hydra web</h1>
+            <div class="header-actions">
+              <button class="btn btn-cobalt theme-toggle" type="button">theme</button>
+              <button class="btn" id="open-run">new run</button>
+            </div>
+          </header>
+          ${renderTicker()}
+          <div class="panel">
+            ${cards || '<div class="small">no runs yet</div>'}
+          </div>
+        `;
+
+        const openRunButton = document.getElementById("open-run");
+        openRunButton.addEventListener("click", () => {
+          runQuery.value = "";
+          runAgents.value = String(defaultAgentCount);
+          agentCountLabel.textContent = runAgents.value;
+          runSearch.checked = defaultSearchEnabled;
+          agentCountTouched = false;
+          searchTouched = false;
+          setRunModalOpen(true, openRunButton);
+        });
+        updateThemeToggleLabels();
+      }
+
+      function renderRunPage(runRecord, transcripts) {
+        const run = runRecord.run;
+        const transcriptRows = transcripts
+          .map((item) => {
+            const escapedPhase = escapeHtml(item.phase);
+            const escapedPersona = escapeHtml(item.persona);
+            const summary = `${escapedPhase}: ${escapedPersona}`;
+            return `
+              <details>
+              <summary>${summary}</summary>
+              <div class="small">status: ${escapeHtml(item.status)}</div>
+              <div class="transcript-output">${renderMarkdown(item.output)}</div>
+              <div class="small">tokens in/out: ${item.promptTokens || 0}/${item.completionTokens || 0}</div>
+            </details>
+            `;
+          })
+          .join("");
+
+        app.innerHTML = `
+          <header>
+            <h1 class="logo">${escapeHtml(run.query)}</h1>
+            <div class="header-actions">
+              <button class="btn btn-cobalt theme-toggle" type="button">theme</button>
+              <a class="btn" href="#/">back</a>
+            </div>
+          </header>
+          ${renderTicker()}
+          <div class="panel">
+            <h2>status</h2>
+            ${statusBadge(run.status)}
+            <div class="small">id: ${escapeHtml(run.id)} · agents: ${state.agentCount || run.agentCount || 0}</div>
+            <div class="small">created: ${new Date(run.createdAt).toLocaleString()}</div>
+            ${renderPhaseProgress()}
+          </div>
+          <div class="panel">
+            <h2>brief</h2>
+            <div id="brief">${renderMarkdown(run.brief || "not ready")}</div>
+          </div>
+          <div class="panel">
+            <h2>agent transcripts</h2>
+            ${transcriptRows || '<div class="small">no transcripts yet</div>'}
+          </div>
+        `;
+        updateThemeToggleLabels();
+      }
+
+      async function refreshRuns() {
+        try {
+          const response = await fetch("/api/runs");
+          if (!response.ok) {
+            throw new Error("failed to fetch runs");
+          }
+          const runs = await response.json();
+          state.runs = runs;
+        } catch {
+          state.runs = [];
+        }
+      }
+
+      async function fetchRun(runId) {
+        const response = await fetch(`/api/runs/${runId}`);
+        if (!response.ok) {
+          throw new Error(`run not found (${response.status})`);
+        }
+        return response.json();
+      }
+
+      function handleEvent(raw) {
+        const event = typeof raw === "string" ? safeJson(raw) : null;
+        if (!event || typeof event !== "object") {
+          return;
+        }
+
+        if (event.type === "run-created") {
+          if (event.query && state.run?.run) {
+            state.run.run.query = event.query;
+          }
+          if (state.run?.run && Number.isFinite(event.agentCount)) {
+            state.run.run.agentCount = event.agentCount;
+          }
+          if (Number.isFinite(event.agentCount)) {
+            state.agentCount = event.agentCount;
+          }
+          if (Number.isFinite(event.totalAgents)) {
+            state.progress.total = event.totalAgents;
+          } else if (Number.isFinite(event.agentCount)) {
+            state.progress.total = event.agentCount;
+          }
+          state.currentPhase = "decompose";
+          state.progress.completed = 0;
+          return;
+        }
+
+        if (event.type === "agent-progress") {
+          if (state.phases[event.phase]) {
+            state.phases[event.phase].completed = event.completedAgents;
+            state.phases[event.phase].total = event.totalAgents;
+          }
+          state.currentPhase = event.phase;
+          state.progress.completed = event.completedAgents;
+          state.progress.total = event.totalAgents;
+          return;
+        }
+
+        if (event.type === "run-status-changed") {
+          if (state.run?.run) {
+            state.run.run.status = event.status;
+          }
+          if (event.status === "error") {
+            state.currentPhase = statusToPhase(event.status, state.currentPhase);
+            if (state.runId) {
+              void refreshRun(state.runId);
+            }
+            if (state.source) {
+              state.source.close();
+              state.source = null;
+            }
+            return;
+          }
+          state.currentPhase = statusToPhase(event.status);
+          return;
+        }
+
+        if (event.type === "agent-complete") {
+          const agentRunId = typeof event.agentRunId === "string" ? event.agentRunId : "";
+          const index = state.transcripts.findIndex(
+            (item) => item.agentRunId === agentRunId,
+          );
+          const payload = {
+            agentRunId,
+            persona: event.persona,
+            phase: event.phase,
+            status: event.state.status,
+            promptTokens: event.state.promptTokens,
+            completionTokens: event.state.completionTokens,
+            output: event.state.output,
+          };
+
+          if (index === -1) {
+            state.transcripts.push(payload);
+          } else {
+            state.transcripts[index] = payload;
+          }
+          return;
+        }
+
+        if (event.type === "run-complete") {
+          if (state.run?.run) {
+            state.run.run.status = "complete";
+          }
+          if (state.progress.total) {
+            state.progress.completed = state.progress.total;
+          }
+          if (state.runId) {
+            void refreshRun(state.runId);
+          }
+          if (state.source) {
+            state.source.close();
+            state.source = null;
+          }
+          return;
+        }
+
+        if (event.type === "done") {
+          if (state.source) {
+            state.source.close();
+            state.source = null;
+          }
+        }
+      }
+
+      async function connectRunEvents(runId) {
+        if (state.source) {
+          state.source.close();
+          state.source = null;
+        }
+
+        state.phases = {
+          decompose: { completed: 0, total: 0 },
+          research: { completed: 0, total: 0 },
+          debate: { completed: 0, total: 0 },
+          synthesis: { completed: 0, total: 0 },
+        };
+        state.currentPhase = statusToPhase(state.run?.run?.status) || "decompose";
+        state.agentCount = state.run?.run?.agentCount ?? state.agentCount ?? 0;
+        state.progress = {
+          completed: 0,
+          total: state.agentCount,
+        };
+        state.runId = runId;
+
+        const source = new EventSource(`/api/runs/${runId}/events`);
+        state.source = source;
+
+        source.onmessage = (msg) => {
+          handleEvent(msg.data);
+          if (state.run) {
+            renderRunPage(state.run, state.transcripts);
+          }
+        };
+
+        source.addEventListener("error", () => {
+          // let browser EventSource retry semantics handle transient disconnects.
+        });
+      }
+
+      async function refreshRun(runId) {
+        const epoch = routeEpoch;
+        const payload = await fetchRun(runId);
+        if (routeEpoch !== epoch) {
+          return;
+        }
+        state.run = payload;
+        state.runId = payload.run.id;
+        state.agentCount = payload.run.agentCount;
+        state.currentPhase = statusToPhase(payload.run.status);
+        state.progress.total = payload.run.agentCount;
+        state.transcripts = Array.isArray(payload.agentRuns)
+          ? payload.agentRuns.map((item) => ({
+              agentRunId: item.id,
+              persona: item.persona,
+              phase: item.phase,
+              status: item.status,
+              promptTokens: item.promptTokens,
+              completionTokens: item.completionTokens,
+              output: item.output,
+            }))
+          : [];
+        state.progress.completed = payload.run.status === "complete" ? payload.run.agentCount : Math.min(
+          state.progress.completed,
+          payload.run.agentCount,
+        );
+        renderRunPage(payload, state.transcripts);
+      }
+
+      async function route() {
+        const epoch = ++routeEpoch;
+        const hash = window.location.hash;
+        if (!hash || hash === "#/") {
+          await refreshRuns();
+          if (epoch !== routeEpoch) {
+            return;
+          }
+          renderDashboard();
+          if (epoch !== routeEpoch) {
+            return;
+          }
+          if (state.source) {
+            state.source.close();
+            state.source = null;
+          }
+          return;
+        }
+
+        if (hash.startsWith("#/runs/")) {
+          const runId = hash.replace("#/runs/", "");
+          try {
+            if (state.source) {
+              state.source.close();
+              state.source = null;
+            }
+            state.transcripts = [];
+            state.run = null;
+            await refreshRun(runId);
+            if (epoch !== routeEpoch) {
+              return;
+            }
+            await connectRunEvents(runId);
+            if (epoch !== routeEpoch) {
+              return;
+            }
+          } catch {
+            if (epoch !== routeEpoch) {
+              return;
+            }
+            window.location.hash = "#/";
+            await refreshRuns();
+            if (epoch !== routeEpoch) {
+              return;
+            }
+            renderDashboard();
+          }
+          return;
+        }
+
+        await refreshRuns();
+        if (epoch !== routeEpoch) {
+          return;
+        }
+        if (state.source) {
+          state.source.close();
+          state.source = null;
+        }
+        renderDashboard();
+      }
+
+      runAgents.addEventListener("input", () => {
+        agentCountTouched = true;
+        agentCountLabel.textContent = runAgents.value;
+      });
+      runSearch.addEventListener("change", () => {
+        searchTouched = true;
+      });
+
+      function markRunStartFailure(message) {
+        runStatus.textContent = message || "failed to start run";
+      }
+
+      runForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const query = runQuery.value.trim();
+        const agentCount = Number(runAgents.value);
+        const searchEnabled = runSearch.checked;
+        const body = { query };
+        let reader = null;
+
+        if (!query) {
+          runStatus.textContent = "query is required";
+          return;
+        }
+
+        if (agentCountTouched || agentCount !== defaultAgentCount) {
+          body.agentCount = agentCount;
+        }
+        if (searchTouched || searchEnabled !== defaultSearchEnabled) {
+          body.searchEnabled = searchEnabled;
+        }
+
+        runStatus.textContent = "starting run...";
+        try {
+          const abortController = new AbortController();
+          const response = await fetch("/api/run", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+            signal: abortController.signal,
+          });
+
+        if (!response.ok) {
+          const errorMessage = await parseRunApiErrorText(response, "");
+          const normalized = typeof errorMessage === "string" ? errorMessage.trim() : "";
+          markRunStartFailure(
+            normalized ? `failed to start run: ${normalized}` : "failed to start run",
+          );
+          return;
+        }
+
+          const responseContentType = response.headers.get("content-type") ?? "";
+          if (!response.body || !responseContentType.includes("text/event-stream")) {
+            const errorMessage = await parseRunApiErrorText(response, "");
+            const normalized = typeof errorMessage === "string" ? errorMessage.trim() : "";
+            markRunStartFailure(
+              normalized ? `failed to start run: ${normalized}` : "failed to start run: invalid response stream",
+            );
+            return;
+          }
+
+          let sawExpectedEvent = false;
+
+          reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+          let buffered = "";
+          while (true) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              break;
+            }
+            buffered += chunk.value;
+            const entries = buffered.split("\n\n");
+            buffered = entries.pop() || "";
+            for (const item of entries) {
+              if (!item.startsWith("data:")) {
+                continue;
+              }
+              const payload = safeJson(item.replace("data:", "").trim());
+              if (!payload) {
+                continue;
+              }
+              if (payload.type === "run-created" && payload.runId) {
+                sawExpectedEvent = true;
+                await reader.cancel();
+                abortController.abort();
+                setRunModalOpen(false, null);
+                runStatus.textContent = "";
+                runQuery.value = "";
+                window.location.hash = `#/runs/${payload.runId}`;
+                return;
+              }
+
+              if (payload.type !== "done") {
+                continue;
+              }
+
+              sawExpectedEvent = true;
+              const startedRunId =
+                typeof payload.runId === "string" ? payload.runId.trim() : "";
+
+              if (!startedRunId) {
+                markRunStartFailure("failed to start run");
+                return;
+              }
+
+              setRunModalOpen(false, null);
+              runStatus.textContent = "";
+              runQuery.value = "";
+              window.location.hash = `#/runs/${startedRunId}`;
+              return;
+            }
+          }
+
+          if (!sawExpectedEvent) {
+            markRunStartFailure("failed to start run: no progress event received");
+            return;
+          }
+        } catch {
+          markRunStartFailure("failed to start run");
+        } finally {
+          if (reader) {
+            try {
+              await reader.cancel();
+            } catch {
+              // ignore reader cleanup failures.
+            }
+          }
+        }
+      });
+
+      runClose.addEventListener("click", () => {
+        setRunModalOpen(false);
+        runStatus.textContent = "";
+      });
+
+      document.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        if (target.classList.contains("theme-toggle")) {
+          event.preventDefault();
+          toggleTheme();
+        }
+      });
+
+      initializeTheme();
+
+      window.addEventListener("hashchange", route);
+      window.addEventListener("load", async () => {
+        await loadRunDefaults();
+        await route();
+      });
+    </script>
+  </body>
+</html>
