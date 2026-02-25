@@ -27,7 +27,7 @@ const DEFAULTS: HydraConfig = {
   baseUrl: DEFAULT_BASE_URL,
   model: DEFAULT_MODEL,
   defaultAgentCount: 5,
-  maxConcurrency: 5,
+  maxConcurrency: 1,
   debateRounds: 2,
   searchEnabled: true,
 };
@@ -162,7 +162,7 @@ function normalizeConfig(config: HydraConfig): HydraConfig {
     baseUrl: config.baseUrl || DEFAULTS.baseUrl,
     model: config.model || DEFAULTS.model,
     defaultAgentCount: clampInt(config.defaultAgentCount, 1, 20, DEFAULTS.defaultAgentCount),
-    maxConcurrency: clampInt(config.maxConcurrency, 1, 5, DEFAULTS.maxConcurrency),
+    maxConcurrency: clampInt(config.maxConcurrency, 1, 1, DEFAULTS.maxConcurrency),
     debateRounds: clampInt(
       config.debateRounds,
       MIN_DEBATE_ROUNDS,
@@ -245,13 +245,13 @@ export function sanitizeConfigValueForSet(
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed)) {
       return {
-        error: "maxConcurrency must be an integer between 1 and 5",
+        error: "maxConcurrency must be 1",
         value: undefined,
       };
     }
-    if (parsed < 1 || parsed > 5) {
+    if (parsed !== 1) {
       return {
-        error: "maxConcurrency must be an integer between 1 and 5",
+        error: "maxConcurrency must be 1",
         value: undefined,
       };
     }
