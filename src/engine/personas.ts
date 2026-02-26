@@ -194,8 +194,8 @@ export const PERSONAS: PersonaConfig[] = [
 
 const BUILTIN_PERSONA_IDS = new Set(PERSONAS.map((persona) => persona.id));
 
-/** maximum number of available built-in personas. */
-export const MAX_PERSONA_COUNT = PERSONAS.length;
+/** number of built-in personas. */
+export const BUILTIN_PERSONA_COUNT = PERSONAS.length;
 
 /** load and normalize all custom personas from config storage. */
 export function loadCustomPersonas(): PersonaConfig[] {
