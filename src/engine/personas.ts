@@ -258,7 +258,11 @@ export function addCustomPersona(persona: PersonaConfig): { error?: string } {
     return { error: "id already exists" };
   }
 
-  saveCustomPersonas([...customPersonas, candidate]);
+  try {
+    saveCustomPersonas([...customPersonas, candidate]);
+  } catch {
+    return { error: "failed to persist custom personas" };
+  }
   return {};
 }
 
@@ -275,7 +279,11 @@ export function removeCustomPersona(id: string): boolean {
     return false;
   }
 
-  saveCustomPersonas(filteredPersonas);
+  try {
+    saveCustomPersonas(filteredPersonas);
+  } catch {
+    return false;
+  }
   return true;
 }
 
