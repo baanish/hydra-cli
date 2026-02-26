@@ -6,6 +6,12 @@ import { writeFileSync } from "node:fs";
 import { getRun, getRunAgentRuns, listRuns, removeRun } from "./db/queries";
 import { HydraPipeline, type PipelineConfig } from "./engine/pipeline";
 import {
+  PERSONAS,
+  addCustomPersona,
+  allPersonas,
+  removeCustomPersona,
+} from "./engine/personas";
+import {
   emitAgentProgress,
   setAgentModeConcurrency,
   setAgentModeDebateRounds,
@@ -123,6 +129,7 @@ const ROOT_COMMANDS = new Set([
   "delete",
   "web",
   "config",
+  "persona",
   "help",
 ]);
 
@@ -321,6 +328,13 @@ function parseJsonLine(value: string) {
   } catch {
     return value;
   }
+}
+
+function slugifyPersonaId(value: string): string {
+  return value.trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
 }
 
 const runCommand = new Command("run")
@@ -646,6 +660,64 @@ const deleteCommand = new Command("delete")
     console.log(`deleted ${runId}`);
   });
 
+const personaListCommand = new Command("list")
+  .description("list built-in and custom personas")
+  .option("--json", "output personas as json")
+  .action((options) => {
+    const builtinPersonaIds = new Set(PERSONAS.map((persona) => persona.id));
+    const personas = allPersonas();
+    if (options.json) {
+      console.log(JSON.stringify(personas, null, 2));
+      return;
+    }
+
+    for (const persona of personas) {
+      const type = builtinPersonaIds.has(persona.id) ? "builtin" : "custom";
+      console.log(`[${type}] ${persona.id}  ${persona.name} — ${persona.description}`);
+    }
+  });
+
+const personaAddCommand = new Command("add")
+  .description("add a custom persona")
+  .requiredOption("--name <name>", "persona name")
+  .requiredOption("--description <desc>", "persona description")
+  .requiredOption("--methodology <methodology>", "persona methodology")
+  .option("--id <id>", "custom persona id")
+  .action((options) => {
+    const id = options.id?.trim() || slugifyPersonaId(options.name);
+    const persona = {
+      id,
+      name: options.name,
+      description: options.description,
+      methodology: options.methodology,
+    };
+    const result = addCustomPersona(persona);
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    console.log(`added persona ${id}`);
+  });
+
+const personaRemoveCommand = new Command("remove")
+  .description("remove a custom persona")
+  .argument("<id>", "custom persona id")
+  .action((id: string) => {
+    if (PERSONAS.some((persona) => persona.id === id)) {
+      throw new Error(`cannot remove builtin persona ${id}`);
+    }
+    const removed = removeCustomPersona(id);
+    if (!removed) {
+      throw new Error(`persona ${id} not found`);
+    }
+    console.log(`removed persona ${id}`);
+  });
+
+const personaCommand = new Command("persona")
+  .description("manage personas")
+  .addCommand(personaListCommand)
+  .addCommand(personaAddCommand)
+  .addCommand(personaRemoveCommand);
+
 const webCommand = new Command("web")
   .description("launch local web UI")
   .option("--port <n>", "port to listen on", "3737")
@@ -695,6 +767,7 @@ command.addCommand(runCommand);
 command.addCommand(historyCommand);
 command.addCommand(viewCommand);
 command.addCommand(deleteCommand);
+command.addCommand(personaCommand);
 command.addCommand(webCommand);
 command.addCommand(configCommand);
 

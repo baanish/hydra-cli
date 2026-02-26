@@ -12,7 +12,7 @@ import {
   markRunFailed,
   addTokenUsage,
 } from "../db/queries";
-import { PERSONAS } from "./personas";
+import { allPersonas } from "./personas";
 import {
   ORCHESTRATOR_PROMPT,
   RESEARCH_PROMPT,
@@ -50,7 +50,7 @@ export type PipelineDependencies = {
 const DEFAULT_DEPENDENCIES: PipelineDependencies = {
   runModel: runModelWithOptionalTools,
   runWithConcurrency,
-  personas: PERSONAS,
+  personas: allPersonas(),
   createRun,
   createAgentRun,
   completeAgentRun,

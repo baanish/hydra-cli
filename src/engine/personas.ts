@@ -1,4 +1,71 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { CONFIG_DIR } from "../config";
 import type { PersonaConfig } from "../types";
+
+const PERSONA_ID_PATTERN = /^[a-z0-9-]+$/;
+
+function trimPersonaValue(value: string): string {
+  return value.trim();
+}
+
+function normalizePersona(persona: PersonaConfig): PersonaConfig {
+  return {
+    id: trimPersonaValue(persona.id).toLowerCase(),
+    name: trimPersonaValue(persona.name),
+    description: trimPersonaValue(persona.description),
+    methodology: trimPersonaValue(persona.methodology),
+  };
+}
+
+function isPersonaConfig(value: unknown): value is PersonaConfig {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<PersonaConfig>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.name !== "string" ||
+    typeof candidate.description !== "string" ||
+    typeof candidate.methodology !== "string"
+  ) {
+    return false;
+  }
+
+  const normalized = normalizePersona({
+    id: candidate.id,
+    name: candidate.name,
+    description: candidate.description,
+    methodology: candidate.methodology,
+  });
+  return (
+    normalized.id.length > 0 &&
+    PERSONA_ID_PATTERN.test(normalized.id) &&
+    normalized.name.length > 0 &&
+    normalized.description.length > 0 &&
+    normalized.methodology.length > 0
+  );
+}
+
+function ensurePersonasDirectoryExists(): void {
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  }
+}
+
+/** location of custom personas persisted on disk. */
+export let PERSONAS_FILE = resolve(CONFIG_DIR, "personas.json");
+
+/** set custom personas storage path for tests or controlled environments. */
+export function setPersonasFile(path: string): void {
+  PERSONAS_FILE = path;
+}
+
+/** return current custom personas storage path. */
+export function getPersonasFile(): string {
+  return PERSONAS_FILE;
+}
 
 /** complete set of built-in personas used by orchestration phases. */
 export const PERSONAS: PersonaConfig[] = [
@@ -124,16 +191,106 @@ export const PERSONAS: PersonaConfig[] = [
   },
 ];
 
-/** maximum number of available personas. */
+const BUILTIN_PERSONA_IDS = new Set(PERSONAS.map((persona) => persona.id));
+
+/** maximum number of available built-in personas. */
 export const MAX_PERSONA_COUNT = PERSONAS.length;
 
-/** find a persona by exact display name. */
+/** load and normalize all custom personas from config storage. */
+export function loadCustomPersonas(): PersonaConfig[] {
+  if (!existsSync(PERSONAS_FILE)) {
+    return [];
+  }
+
+  const raw = readFileSync(PERSONAS_FILE, "utf8").trim();
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every(isPersonaConfig)) {
+      return [];
+    }
+    return parsed.map((value) => normalizePersona(value));
+  } catch {
+    return [];
+  }
+}
+
+/** write custom personas list to disk with restricted file permissions. */
+export function saveCustomPersonas(personas: PersonaConfig[]): void {
+  ensurePersonasDirectoryExists();
+  writeFileSync(PERSONAS_FILE, JSON.stringify(personas, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  chmodSync(PERSONAS_FILE, 0o600);
+}
+
+/** append a new custom persona after validation and persist it. */
+export function addCustomPersona(persona: PersonaConfig): { error?: string } {
+  const candidate = normalizePersona(persona);
+  if (!candidate.id.length) {
+    return { error: "id must be non-empty" };
+  }
+  if (!candidate.name.length) {
+    return { error: "name must be non-empty" };
+  }
+  if (!candidate.description.length) {
+    return { error: "description must be non-empty" };
+  }
+  if (!candidate.methodology.length) {
+    return { error: "methodology must be non-empty" };
+  }
+  if (!PERSONA_ID_PATTERN.test(candidate.id)) {
+    return {
+      error: "id must be lowercase alphanumeric and hyphens only",
+    };
+  }
+  if (BUILTIN_PERSONA_IDS.has(candidate.id)) {
+    return { error: "id already exists" };
+  }
+
+  const customPersonas = loadCustomPersonas();
+  if (customPersonas.some((existing) => existing.id === candidate.id)) {
+    return { error: "id already exists" };
+  }
+
+  saveCustomPersonas([...customPersonas, candidate]);
+  return {};
+}
+
+/** remove a custom persona by id from storage. */
+export function removeCustomPersona(id: string): boolean {
+  const normalizedId = trimPersonaValue(id);
+  if (!normalizedId.length) {
+    return false;
+  }
+
+  const customPersonas = loadCustomPersonas();
+  const filteredPersonas = customPersonas.filter((persona) => persona.id !== normalizedId);
+  if (filteredPersonas.length === customPersonas.length) {
+    return false;
+  }
+
+  saveCustomPersonas(filteredPersonas);
+  return true;
+}
+
+/** return built-in and custom personas with built-ins first. */
+export function allPersonas(): PersonaConfig[] {
+  return [...PERSONAS, ...loadCustomPersonas()];
+}
+
+/** find a persona by exact display name from built-ins. */
 export function getPersonaByName(name: string): PersonaConfig | undefined {
   return PERSONAS.find((persona) => persona.name === name);
 }
 
 /** select a stable prefix of personas up to requested count. */
 export function selectPersonas(count: number): PersonaConfig[] {
-  const safeCount = Math.max(1, Math.min(PERSONAS.length, count));
-  return PERSONAS.slice(0, safeCount);
+  const all = allPersonas();
+  const safeCount = Math.max(1, Math.min(all.length, count));
+  return all.slice(0, safeCount);
 }
