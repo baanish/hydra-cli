@@ -244,15 +244,22 @@ describe("personas storage helpers", () => {
         },
       ]),
     ];
+    const prompts: string[] = [];
     let callCount = 0;
 
-    const generated = await generateEphemeralPersonas("test retries", 3, async () => {
+    const generated = await generateEphemeralPersonas("test retries", 3, async (_, userPrompt) => {
       const response = outputs[callCount];
       callCount += 1;
+      prompts.push(userPrompt);
       return response ?? "[]";
     });
 
     expect(callCount).toBe(3);
+    expect(prompts).toEqual([
+      'Generate 3 distinct analyst personas best suited to research: "test retries". Return a JSON array where each object has: id (lowercase-alphanumeric-hyphens), name, description (one sentence), methodology (short phrase). No markdown, no explanation.',
+      'Generate 3 distinct analyst personas best suited to research: "test retries". Return a JSON array where each object has: id (lowercase-alphanumeric-hyphens), name, description (one sentence), methodology (short phrase). No markdown, no explanation.',
+      'Generate 2 distinct analyst personas best suited to research: "test retries". Return a JSON array where each object has: id (lowercase-alphanumeric-hyphens), name, description (one sentence), methodology (short phrase). No markdown, no explanation.',
+    ]);
     expect(generated).toEqual([
       {
         id: "good-persona",

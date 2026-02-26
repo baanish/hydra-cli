@@ -122,10 +122,11 @@ export class HydraPipeline extends EventEmitter {
 
     try {
       let personas = this.resolvePersonas();
+      let agentCount = this.#config.agentCount;
       if (this.#config.customPersonasOnly) {
         const customPersonas = loadCustomPersonas();
-        if (customPersonas.length < this.#config.agentCount) {
-          const gap = this.#config.agentCount - customPersonas.length;
+        if (customPersonas.length < agentCount) {
+          const gap = agentCount - customPersonas.length;
           const generatedPersonas = await generateEphemeralPersonas(
             query,
             gap,
@@ -142,11 +143,24 @@ export class HydraPipeline extends EventEmitter {
           console.error(`[hydra] generated ${gap} ephemeral persona(s) to fill agent count`);
           personas = [...customPersonas, ...generatedPersonas];
         } else {
-          personas = customPersonas.slice(0, this.#config.agentCount);
+          personas = customPersonas.slice(0, agentCount);
+        }
+
+        if (personas.length < 1) {
+          throw new Error(
+            "custom-personas-only mode requires at least 1 persona; define custom personas with `hydra persona add` or increase agent count",
+          );
+        }
+
+        if (personas.length < agentCount) {
+          console.error(
+            `[hydra] persona pool has ${personas.length} persona(s); clamping agent count from ${agentCount} to ${personas.length}`,
+          );
+          agentCount = personas.length;
         }
       }
 
-      const decomposedAssignments = await this.decompose(query, run.id, personas);
+      const decomposedAssignments = await this.decompose(query, run.id, personas, agentCount);
       const selectedPersonas = decomposedAssignments.map(({ persona }) => persona);
 
       this.setStatus(run.id, "researching");
@@ -205,12 +219,17 @@ export class HydraPipeline extends EventEmitter {
     }
   }
 
-  private async decompose(query: string, runId: string, personas: PersonaConfig[]): Promise<AssignedPersona[]> {
+  private async decompose(
+    query: string,
+    runId: string,
+    personas: PersonaConfig[],
+    agentCount = this.#config.agentCount,
+  ): Promise<AssignedPersona[]> {
     const personaLines = personas
       .map((persona) => `- ${persona.name}: ${persona.description}`)
       .join("\n");
     const decomposePrompt = [
-      `You are an orchestrator choosing ${this.#config.agentCount} specialists.`,
+      `You are an orchestrator choosing ${agentCount} specialists.`,
       "Choose the most relevant personas for this query.",
       `Available personas:\n${personaLines}`,
       `Query: ${query}`,
@@ -224,7 +243,7 @@ export class HydraPipeline extends EventEmitter {
     });
 
     const parsedAssignments = this.parseAssignments(result.output);
-    const resolvedAssignments = this.normalizeAssignments(parsedAssignments, personas, query);
+    const resolvedAssignments = this.normalizeAssignments(parsedAssignments, personas, query, agentCount);
 
     const usedPersonas = new Set<string>();
     return resolvedAssignments.map((assignment) => ({
@@ -610,8 +629,8 @@ export class HydraPipeline extends EventEmitter {
     assignments: DecomposedAssignment[],
     personas: PersonaConfig[],
     query: string,
+    targetCount = this.#config.agentCount,
   ): DecomposedAssignment[] {
-    const targetCount = this.#config.agentCount;
     const usedPersonas = new Set<string>();
     const availablePersonas = personas.filter(
       (persona) => persona.name.trim().length > 0,

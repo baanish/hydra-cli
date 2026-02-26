@@ -245,7 +245,8 @@ export async function generateEphemeralPersonas(
     `Generate ${remaining} distinct analyst personas best suited to research: "${query}". Return a JSON array where each object has: id (lowercase-alphanumeric-hyphens), name, description (one sentence), methodology (short phrase). No markdown, no explanation.`;
 
   for (let attempt = 0; attempt < 3 && personas.length < targetCount; attempt += 1) {
-    const userPrompt = missingPrompt(targetCount);
+    const remaining = targetCount - personas.length;
+    const userPrompt = missingPrompt(remaining);
     const raw = await runModel(EPHEMERAL_PERSONA_PROMPT, userPrompt);
     const candidates = parsePersonaCandidates(raw);
 

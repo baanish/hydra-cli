@@ -510,4 +510,18 @@ describe("HydraPipeline", () => {
     expect(harness.modelInputs).toHaveLength(7);
     expect(harness.modelInputs[1]!.userPrompt).toContain("- Ephemeral Analyst: fills missing perspective");
   });
+
+  test("throws when custom-personas-only ends with an empty persona pool", async () => {
+    const harness = createHarness([resolveStep("[]"), resolveStep("[]"), resolveStep("[]")]);
+
+    const pipeline = new HydraPipeline(createPipelineConfig(1, true, 2), harness.deps);
+
+    await expect(pipeline.run("fill none")).rejects.toThrow(
+      "custom-personas-only mode requires at least 1 persona; define custom personas with `hydra persona add` or increase agent count",
+    );
+    expect(harness.runFailures.at(-1)).toBe(
+      "custom-personas-only mode requires at least 1 persona; define custom personas with `hydra persona add` or increase agent count",
+    );
+    expect(harness.modelInputs).toHaveLength(3);
+  });
 });
