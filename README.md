@@ -38,6 +38,19 @@ node -e "console.log(require('./examples/ai-transition-2036.json').brief)"
 | `hydra config set <key> <value>` | update a config value | `hydra config set max-concurrency 5` |
 | `hydra web` | launch local web UI | `hydra web --port 3737` |
 
+## personas
+
+personas are specialist analytical lenses assigned to agents (for example `skeptic`, `futurist`, `economist`) to bias how perspectives are generated and debated. hydra ships with 20 built-in personas.
+
+| command | purpose | example |
+| --- | --- | --- |
+| `hydra persona list` | list all personas (built-in + custom) | `hydra persona list` |
+| `hydra persona list --json` | output personas as json | `hydra persona list --json` |
+| `hydra persona add` | add a custom persona | `hydra persona add --name "The Lawyer" --description "Applies legal reasoning and precedent." --methodology "case law analysis"` |
+| `hydra persona remove <id>` | remove a custom persona | `hydra persona remove the-lawyer` |
+
+custom personas are stored in `~/.config/hydra-cli/personas.json`. built-in personas cannot be removed. if `--id` is not provided when adding a persona, it is auto-derived from the name using slugification.
+
 ## config options
 
 | key | type | default |
