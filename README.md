@@ -32,6 +32,7 @@ node -e "console.log(require('./examples/ai-transition-2036.json').brief)"
 | command | purpose | example |
 | --- | --- | --- |
 | `hydra run <query>` | start a run (also supports `hydra "<query>"`) | `hydra run "market entry strategy"` |
+| `hydra run --custom-personas-only <query>` | use custom personas only (fill missing personas with ephemeral generated ones) | `hydra run --custom-personas-only --agents 5 "supply chain strategy"` |
 | `hydra view <run-id>` | inspect a run summary | `hydra view Rw9k...` |
 | `hydra history` | list recent runs | `hydra history --limit 20` |
 | `hydra config show` | print effective config with masked keys | `hydra config show` |
@@ -66,6 +67,7 @@ custom personas are stored in `~/.config/hydra-cli/personas.json`. built-in pers
 | `maxConcurrency` | `number` | `5` |
 | `debateRounds` | `number` | `2` |
 | `searchEnabled` | `boolean` | `true` |
+| `customPersonasOnly` | `boolean` | `false` |
 
 ## note on backend
 

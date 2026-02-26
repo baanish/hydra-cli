@@ -12,7 +12,7 @@ import {
   markRunFailed,
   addTokenUsage,
 } from "../db/queries";
-import { allPersonas } from "./personas";
+import { allPersonas, generateEphemeralPersonas, loadCustomPersonas } from "./personas";
 import {
   ORCHESTRATOR_PROMPT,
   RESEARCH_PROMPT,
@@ -31,6 +31,7 @@ export interface PipelineConfig {
   maxConcurrency: number;
   debateRounds: number;
   searchEnabled: boolean;
+  customPersonasOnly: boolean;
 }
 
 export type PipelineDependencies = {
@@ -120,8 +121,32 @@ export class HydraPipeline extends EventEmitter {
     } satisfies PipelineEvent);
 
     try {
-      const allPersonas = this.resolvePersonas();
-      const decomposedAssignments = await this.decompose(query, run.id, allPersonas);
+      let personas = this.resolvePersonas();
+      if (this.#config.customPersonasOnly) {
+        const customPersonas = loadCustomPersonas();
+        if (customPersonas.length < this.#config.agentCount) {
+          const gap = this.#config.agentCount - customPersonas.length;
+          const generatedPersonas = await generateEphemeralPersonas(
+            query,
+            gap,
+            async (systemPrompt, userPrompt) => {
+              const result = await this.runModel({
+                runId: run.id,
+                systemPrompt,
+                userPrompt,
+                allowTools: false,
+              });
+              return result.output;
+            },
+          );
+          console.error(`[hydra] generated ${gap} ephemeral persona(s) to fill agent count`);
+          personas = [...customPersonas, ...generatedPersonas];
+        } else {
+          personas = customPersonas.slice(0, this.#config.agentCount);
+        }
+      }
+
+      const decomposedAssignments = await this.decompose(query, run.id, personas);
       const selectedPersonas = decomposedAssignments.map(({ persona }) => persona);
 
       this.setStatus(run.id, "researching");

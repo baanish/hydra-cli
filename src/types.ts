@@ -67,6 +67,7 @@ export interface Config {
   maxConcurrency: number;
   debateRounds: number;
   searchEnabled: boolean;
+  customPersonasOnly: boolean;
 }
 
 /** partial configuration loaded from user-provided files or overrides. */

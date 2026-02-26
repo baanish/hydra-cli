@@ -7,6 +7,7 @@ import {
   PERSONAS,
   addCustomPersona,
   allPersonas,
+  generateEphemeralPersonas,
   getPersonasFile,
   loadCustomPersonas,
   removeCustomPersona,
@@ -175,5 +176,96 @@ describe("personas storage helpers", () => {
     expect(selected).toHaveLength(PERSONAS.length + 1);
     expect(selectedIds).toContain("selectable-custom");
     expect(selected.at(-1)?.id).toBe("selectable-custom");
+  });
+
+  test("generateEphemeralPersonas returns valid PersonaConfig[] from valid JSON", async () => {
+    const generated = await generateEphemeralPersonas("analyze migration risks", 2, async () =>
+      JSON.stringify([
+        {
+          id: "Risk-Analyst",
+          name: "Risk Analyst",
+          description: "Analyzes downside scenarios and failure modes.",
+          methodology: "risk-first analysis",
+        },
+        {
+          id: "scenario-mapper",
+          name: "Scenario Mapper",
+          description: "Builds futures and branches around edge cases.",
+          methodology: "scenario mapping",
+        },
+      ]),
+    );
+
+    expect(generated).toEqual([
+      {
+        id: "risk-analyst",
+        name: "Risk Analyst",
+        description: "Analyzes downside scenarios and failure modes.",
+        methodology: "risk-first analysis",
+      },
+      {
+        id: "scenario-mapper",
+        name: "Scenario Mapper",
+        description: "Builds futures and branches around edge cases.",
+        methodology: "scenario mapping",
+      },
+    ]);
+  });
+
+  test("generateEphemeralPersonas retries and filters invalid personas", async () => {
+    const outputs = [
+      "not-json",
+      JSON.stringify([
+        {
+          id: "bad id!",
+          name: "Bad Persona",
+          description: "Description",
+          methodology: "Methodology",
+        },
+        {
+          id: "good-persona",
+          name: "Good Persona",
+          description: "Description",
+          methodology: "Methodology",
+        },
+      ]),
+      JSON.stringify([
+        {
+          id: "valid-two",
+          name: "Valid Two",
+          description: "Description",
+          methodology: "Method",
+        },
+        {
+          id: "good-persona",
+          name: "Duplicate Persona",
+          description: "Description",
+          methodology: "Methodology",
+        },
+      ]),
+    ];
+    let callCount = 0;
+
+    const generated = await generateEphemeralPersonas("test retries", 3, async () => {
+      const response = outputs[callCount];
+      callCount += 1;
+      return response ?? "[]";
+    });
+
+    expect(callCount).toBe(3);
+    expect(generated).toEqual([
+      {
+        id: "good-persona",
+        name: "Good Persona",
+        description: "Description",
+        methodology: "Methodology",
+      },
+      {
+        id: "valid-two",
+        name: "Valid Two",
+        description: "Description",
+        methodology: "Method",
+      },
+    ]);
   });
 });

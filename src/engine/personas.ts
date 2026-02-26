@@ -197,6 +197,79 @@ const BUILTIN_PERSONA_IDS = new Set(PERSONAS.map((persona) => persona.id));
 /** number of built-in personas. */
 export const BUILTIN_PERSONA_COUNT = PERSONAS.length;
 
+const EPHEMERAL_PERSONA_PROMPT =
+  "You are a persona designer. Return ONLY a valid JSON array of analyst personas.";
+
+function parsePersonaCandidates(raw: string): unknown[] {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let candidate = trimmed;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    candidate = fenced[1].trim();
+  } else {
+    const start = trimmed.indexOf("[");
+    const end = trimmed.lastIndexOf("]");
+    if (start === -1 || end <= start) {
+      return [];
+    }
+    candidate = trimmed.slice(start, end + 1).trim();
+  }
+
+  try {
+    const parsed = JSON.parse(candidate);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** generate additional personas from the model to fill a custom personas shortfall. */
+export async function generateEphemeralPersonas(
+  query: string,
+  count: number,
+  runModel: (systemPrompt: string, userPrompt: string) => Promise<string>,
+): Promise<PersonaConfig[]> {
+  const targetCount = Math.max(0, count);
+  if (targetCount === 0) {
+    return [];
+  }
+
+  const personas: PersonaConfig[] = [];
+  const usedIds = new Set<string>();
+
+  const missingPrompt = (remaining: number) =>
+    `Generate ${remaining} distinct analyst personas best suited to research: "${query}". Return a JSON array where each object has: id (lowercase-alphanumeric-hyphens), name, description (one sentence), methodology (short phrase). No markdown, no explanation.`;
+
+  for (let attempt = 0; attempt < 3 && personas.length < targetCount; attempt += 1) {
+    const userPrompt = missingPrompt(targetCount);
+    const raw = await runModel(EPHEMERAL_PERSONA_PROMPT, userPrompt);
+    const candidates = parsePersonaCandidates(raw);
+
+    for (const candidate of candidates) {
+      if (!isPersonaConfig(candidate)) {
+        continue;
+      }
+
+      const normalized = normalizePersona(candidate);
+      if (usedIds.has(normalized.id)) {
+        continue;
+      }
+
+      usedIds.add(normalized.id);
+      personas.push(normalized);
+      if (personas.length >= targetCount) {
+        break;
+      }
+    }
+  }
+
+  return personas.slice(0, targetCount);
+}
+
 /** load and normalize all custom personas from config storage. */
 export function loadCustomPersonas(): PersonaConfig[] {
   try {

@@ -53,6 +53,7 @@ const configKeyMap: Record<string, keyof HydraConfig> = {
   "max-concurrency": "maxConcurrency",
   "debate-rounds": "debateRounds",
   "search-enabled": "searchEnabled",
+  "custom-personas-only": "customPersonasOnly",
 };
 
 function resolveLlmApiKey(config: HydraConfig): string {
@@ -347,6 +348,7 @@ const runCommand = new Command("run")
     `debate rounds for this run (${MIN_DEBATE_ROUNDS}-${MAX_DEBATE_ROUNDS})`,
   )
   .option("--model <model>", "model override for this run")
+  .option("--custom-personas-only", "use only custom personas (and generate ephemeral personas if needed)")
   .option("-o, --output <file>", "write full synthesis output to file")
   .option("--agent-mode", "emit machine-friendly logs")
   .option("--json", "emit json payload")
@@ -366,11 +368,15 @@ const runCommand = new Command("run")
     const resolvedModel = typeof options.model === "string" && options.model.trim().length > 0
       ? options.model.trim()
       : baseConfig.model;
+    const resolvedCustomPersonasOnly = options.customPersonasOnly
+      ? true
+      : baseConfig.customPersonasOnly;
     const config = {
       ...baseConfig,
       maxConcurrency: resolvedConcurrency,
       debateRounds: resolvedDebateRounds,
       model: resolvedModel,
+      customPersonasOnly: resolvedCustomPersonasOnly,
     };
 
     const modelApiKey = resolveLlmApiKey(config);
@@ -408,6 +414,7 @@ const runCommand = new Command("run")
       maxConcurrency: config.maxConcurrency,
       debateRounds: config.debateRounds,
       searchEnabled: config.searchEnabled,
+      customPersonasOnly: config.customPersonasOnly,
     };
 
     const pipeline = new HydraPipeline(pipelineConfig);
@@ -736,14 +743,14 @@ const configSetCommand = new Command("set")
   .description("set a config value")
   .argument(
     "<key>",
-    "api-key | synthetic-api-key | search-provider | exa-api-key | brave-api-key | model | base-url | default-agent-count | max-concurrency | debate-rounds | search-enabled",
+    "api-key | synthetic-api-key | search-provider | exa-api-key | brave-api-key | model | base-url | default-agent-count | max-concurrency | debate-rounds | search-enabled | custom-personas-only",
   )
   .argument("<value>")
   .action((key: string, rawValue: string) => {
     const mapped = configKeyMap[key];
     if (!mapped) {
       throw new Error(
-        "invalid key. valid keys: api-key, synthetic-api-key, search-provider, exa-api-key, brave-api-key, model, base-url, default-agent-count, max-concurrency, debate-rounds, search-enabled",
+        "invalid key. valid keys: api-key, synthetic-api-key, search-provider, exa-api-key, brave-api-key, model, base-url, default-agent-count, max-concurrency, debate-rounds, search-enabled, custom-personas-only",
       );
     }
 
