@@ -6,6 +6,12 @@ import { writeFileSync } from "node:fs";
 import { getRun, getRunAgentRuns, listRuns, removeRun } from "./db/queries";
 import { HydraPipeline, type PipelineConfig } from "./engine/pipeline";
 import {
+  PERSONAS,
+  addCustomPersona,
+  allPersonas,
+  removeCustomPersona,
+} from "./engine/personas";
+import {
   emitAgentProgress,
   setAgentModeConcurrency,
   setAgentModeDebateRounds,
@@ -47,6 +53,7 @@ const configKeyMap: Record<string, keyof HydraConfig> = {
   "max-concurrency": "maxConcurrency",
   "debate-rounds": "debateRounds",
   "search-enabled": "searchEnabled",
+  "custom-personas-only": "customPersonasOnly",
 };
 
 function resolveLlmApiKey(config: HydraConfig): string {
@@ -123,6 +130,7 @@ const ROOT_COMMANDS = new Set([
   "delete",
   "web",
   "config",
+  "persona",
   "help",
 ]);
 
@@ -323,6 +331,13 @@ function parseJsonLine(value: string) {
   }
 }
 
+function slugifyPersonaId(value: string): string {
+  return value.trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+}
+
 const runCommand = new Command("run")
   .description("run a hydra query")
   .argument("<query>", "query to process")
@@ -333,6 +348,7 @@ const runCommand = new Command("run")
     `debate rounds for this run (${MIN_DEBATE_ROUNDS}-${MAX_DEBATE_ROUNDS})`,
   )
   .option("--model <model>", "model override for this run")
+  .option("--custom-personas-only", "use only custom personas (and generate ephemeral personas if needed)")
   .option("-o, --output <file>", "write full synthesis output to file")
   .option("--agent-mode", "emit machine-friendly logs")
   .option("--json", "emit json payload")
@@ -352,11 +368,15 @@ const runCommand = new Command("run")
     const resolvedModel = typeof options.model === "string" && options.model.trim().length > 0
       ? options.model.trim()
       : baseConfig.model;
+    const resolvedCustomPersonasOnly = options.customPersonasOnly
+      ? true
+      : baseConfig.customPersonasOnly;
     const config = {
       ...baseConfig,
       maxConcurrency: resolvedConcurrency,
       debateRounds: resolvedDebateRounds,
       model: resolvedModel,
+      customPersonasOnly: resolvedCustomPersonasOnly,
     };
 
     const modelApiKey = resolveLlmApiKey(config);
@@ -394,6 +414,7 @@ const runCommand = new Command("run")
       maxConcurrency: config.maxConcurrency,
       debateRounds: config.debateRounds,
       searchEnabled: config.searchEnabled,
+      customPersonasOnly: config.customPersonasOnly,
     };
 
     const pipeline = new HydraPipeline(pipelineConfig);
@@ -646,6 +667,64 @@ const deleteCommand = new Command("delete")
     console.log(`deleted ${runId}`);
   });
 
+const personaListCommand = new Command("list")
+  .description("list built-in and custom personas")
+  .option("--json", "output personas as json")
+  .action((options) => {
+    const builtinPersonaIds = new Set(PERSONAS.map((persona) => persona.id));
+    const personas = allPersonas();
+    if (options.json) {
+      console.log(JSON.stringify(personas, null, 2));
+      return;
+    }
+
+    for (const persona of personas) {
+      const type = builtinPersonaIds.has(persona.id) ? "builtin" : "custom";
+      console.log(`[${type}] ${persona.id}  ${persona.name} — ${persona.description}`);
+    }
+  });
+
+const personaAddCommand = new Command("add")
+  .description("add a custom persona")
+  .requiredOption("--name <name>", "persona name")
+  .requiredOption("--description <desc>", "persona description")
+  .requiredOption("--methodology <methodology>", "persona methodology")
+  .option("--id <id>", "custom persona id")
+  .action((options) => {
+    const id = options.id?.trim() || slugifyPersonaId(options.name);
+    const persona = {
+      id,
+      name: options.name,
+      description: options.description,
+      methodology: options.methodology,
+    };
+    const result = addCustomPersona(persona);
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    console.log(`added persona ${id}`);
+  });
+
+const personaRemoveCommand = new Command("remove")
+  .description("remove a custom persona")
+  .argument("<id>", "custom persona id")
+  .action((id: string) => {
+    if (PERSONAS.some((persona) => persona.id === id)) {
+      throw new Error(`cannot remove builtin persona ${id}`);
+    }
+    const removed = removeCustomPersona(id);
+    if (!removed) {
+      throw new Error(`persona ${id} not found`);
+    }
+    console.log(`removed persona ${id}`);
+  });
+
+const personaCommand = new Command("persona")
+  .description("manage personas")
+  .addCommand(personaListCommand)
+  .addCommand(personaAddCommand)
+  .addCommand(personaRemoveCommand);
+
 const webCommand = new Command("web")
   .description("launch local web UI")
   .option("--port <n>", "port to listen on", "3737")
@@ -664,14 +743,14 @@ const configSetCommand = new Command("set")
   .description("set a config value")
   .argument(
     "<key>",
-    "api-key | synthetic-api-key | search-provider | exa-api-key | brave-api-key | model | base-url | default-agent-count | max-concurrency | debate-rounds | search-enabled",
+    "api-key | synthetic-api-key | search-provider | exa-api-key | brave-api-key | model | base-url | default-agent-count | max-concurrency | debate-rounds | search-enabled | custom-personas-only",
   )
   .argument("<value>")
   .action((key: string, rawValue: string) => {
     const mapped = configKeyMap[key];
     if (!mapped) {
       throw new Error(
-        "invalid key. valid keys: api-key, synthetic-api-key, search-provider, exa-api-key, brave-api-key, model, base-url, default-agent-count, max-concurrency, debate-rounds, search-enabled",
+        "invalid key. valid keys: api-key, synthetic-api-key, search-provider, exa-api-key, brave-api-key, model, base-url, default-agent-count, max-concurrency, debate-rounds, search-enabled, custom-personas-only",
       );
     }
 
@@ -695,6 +774,7 @@ command.addCommand(runCommand);
 command.addCommand(historyCommand);
 command.addCommand(viewCommand);
 command.addCommand(deleteCommand);
+command.addCommand(personaCommand);
 command.addCommand(webCommand);
 command.addCommand(configCommand);
 

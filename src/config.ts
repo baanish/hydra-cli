@@ -30,6 +30,7 @@ const DEFAULTS: HydraConfig = {
   maxConcurrency: 1,
   debateRounds: 2,
   searchEnabled: true,
+  customPersonasOnly: false,
 };
 
 /** convert raw numeric values into clamped integers with safe fallback. */
@@ -138,6 +139,12 @@ function applyEnvironmentOverrides(config: HydraConfigFile): HydraConfigFile {
   if (process.env.HYDRA_BASE_URL) {
     merged.baseUrl = process.env.HYDRA_BASE_URL;
   }
+  if (process.env.HYDRA_CUSTOM_PERSONAS_ONLY) {
+    const parsed = normalizeBoolean(process.env.HYDRA_CUSTOM_PERSONAS_ONLY);
+    if (parsed !== undefined) {
+      merged.customPersonasOnly = parsed;
+    }
+  }
   if (process.env.HYDRA_CONCURRENCY) {
     const parsed = Number.parseInt(process.env.HYDRA_CONCURRENCY, 10);
     if (Number.isFinite(parsed)) {
@@ -172,6 +179,9 @@ function normalizeConfig(config: HydraConfig): HydraConfig {
     searchEnabled: typeof config.searchEnabled === "boolean"
       ? config.searchEnabled
       : DEFAULTS.searchEnabled,
+    customPersonasOnly: typeof config.customPersonasOnly === "boolean"
+      ? config.customPersonasOnly
+      : DEFAULTS.customPersonasOnly,
   };
 }
 
@@ -278,6 +288,17 @@ export function sanitizeConfigValueForSet(
     if (parsed === undefined) {
       return {
         error: "searchEnabled must be one of: true, false, 1, 0, yes, no",
+        value: undefined,
+      };
+    }
+    return { value: parsed };
+  }
+
+  if (key === "customPersonasOnly") {
+    const parsed = normalizeBoolean(value);
+    if (parsed === undefined) {
+      return {
+        error: "custom-personas-only must be one of: true, false, 1, 0, yes, no",
         value: undefined,
       };
     }

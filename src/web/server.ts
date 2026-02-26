@@ -688,6 +688,7 @@ export async function startWebServer(port: number): Promise<void> {
           maxConcurrency: config.maxConcurrency,
           debateRounds: config.debateRounds,
           searchEnabled: resolvedSearchEnabled,
+          customPersonasOnly: config.customPersonasOnly,
         };
 
         const pipeline = new HydraPipeline(pipelineConfig);

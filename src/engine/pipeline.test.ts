@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { ModelRunResult } from "./model";
 import { HydraPipeline, type PipelineDependencies } from "./pipeline";
+import { getPersonasFile, setPersonasFile } from "./personas";
 import type { PersonaConfig } from "../types";
 
 type ModelStep =
@@ -71,6 +75,16 @@ function decomposeAssignmentsOutput(): string {
   );
 }
 
+function customDecomposeAssignmentsOutput(personas: PersonaConfig[]): string {
+  return JSON.stringify(
+    personas.map((persona, index) => ({
+      persona: persona.name,
+      subQuestion: `custom-sub-question-${index + 1}`,
+      methodology: persona.methodology,
+    })),
+  );
+}
+
 function createHarness(steps: ModelStep[]) {
   const modelSteps = [...steps];
   const runs = new Map<string, ReturnType<PipelineDependencies["createRun"]>>();
@@ -78,6 +92,7 @@ function createHarness(steps: ModelStep[]) {
   const runFailures: string[] = [];
   const runCompletions: string[] = [];
   const addTokenUsageCalls: Array<Parameters<PipelineDependencies["addTokenUsage"]>> = [];
+  const modelInputs: Array<{ systemPrompt: string; userPrompt: string }> = [];
   let runSeq = 0;
   let agentSeq = 0;
 
@@ -86,6 +101,10 @@ function createHarness(steps: ModelStep[]) {
     runModel: async (
       input: Parameters<PipelineDependencies["runModel"]>[0],
     ): Promise<ModelRunResult> => {
+      modelInputs.push({
+        systemPrompt: input.systemPrompt,
+        userPrompt: input.userPrompt,
+      });
       input.onExecutionStart?.(Date.now());
       const step = modelSteps.shift();
       if (!step) {
@@ -249,10 +268,11 @@ function createHarness(steps: ModelStep[]) {
     runFailures,
     runCompletions,
     addTokenUsageCalls,
+    modelInputs,
   };
 }
 
-function createPipelineConfig(debateRounds = 1) {
+function createPipelineConfig(debateRounds = 1, customPersonasOnly = false, agentCount = TEST_PERSONAS.length) {
   return {
     apiKey: "api-key",
     baseUrl: "https://example.invalid/v1",
@@ -263,21 +283,36 @@ function createPipelineConfig(debateRounds = 1) {
       exaApiKey: "",
       braveApiKey: "",
     },
-    agentCount: TEST_PERSONAS.length,
+    agentCount,
     maxConcurrency: 1,
     debateRounds,
     searchEnabled: false,
+    customPersonasOnly,
   };
+}
+
+const DEFAULT_PERSONAS_FILE = getPersonasFile();
+let tempDir = "";
+let tempPersonasFile = "";
+
+function setCustomPersonas(personas: PersonaConfig[]): void {
+  writeFileSync(tempPersonasFile, JSON.stringify(personas, null, 2), "utf8");
 }
 
 beforeEach(() => {
   // deterministic timestamps for cleaner assertions
   let now = 10_000;
   Date.now = () => now++;
+
+  tempDir = mkdtempSync(join(tmpdir(), "hydra-persona-pool-"));
+  tempPersonasFile = join(tempDir, "personas.json");
+  setPersonasFile(tempPersonasFile);
 });
 
 afterEach(() => {
   Date.now = originalDateNow;
+  setPersonasFile(DEFAULT_PERSONAS_FILE);
+  rmSync(tempDir, { recursive: true, force: true });
 });
 
 describe("HydraPipeline", () => {
@@ -395,5 +430,98 @@ describe("HydraPipeline", () => {
     await expect(pipeline.run("q")).rejects.toThrow("synthesis crashed");
     expect(harness.runFailures.at(-1)).toBe("synthesis crashed");
     expect(harness.addTokenUsageCalls).toHaveLength(7);
+  });
+
+  test("uses only custom personas when custom-personas-only is enabled and enough custom personas exist", async () => {
+    const customPersonas: PersonaConfig[] = [
+      {
+        id: "custom-alpha",
+        name: "Custom Alpha",
+        description: "maps risk with constraints",
+        methodology: "custom method",
+      },
+      {
+        id: "custom-beta",
+        name: "Custom Beta",
+        description: "finds execution details",
+        methodology: "custom method",
+      },
+    ];
+    setCustomPersonas(customPersonas);
+
+    const harness = createHarness([
+      resolveStep(customDecomposeAssignmentsOutput(customPersonas)),
+      resolveStep("research-alpha"),
+      resolveStep("research-beta"),
+      resolveStep("debate-alpha"),
+      resolveStep("debate-beta"),
+      resolveStep("final synthesis"),
+    ]);
+
+    const pipeline = new HydraPipeline(
+      createPipelineConfig(1, true, customPersonas.length),
+      harness.deps,
+    );
+
+    await pipeline.run("what is custom enough");
+
+    expect(harness.modelInputs[0]!.userPrompt).toContain("- Custom Alpha: maps risk with constraints");
+    expect(harness.modelInputs[0]!.userPrompt).toContain("- Custom Beta: finds execution details");
+    expect(harness.modelInputs[0]!.userPrompt).not.toContain("The Skeptic");
+  });
+
+  test("generates ephemeral personas to fill custom-personas-only shortfall", async () => {
+    const customPersonas: PersonaConfig[] = [
+      {
+        id: "custom-only",
+        name: "Custom Only",
+        description: "exists for baseline",
+        methodology: "baseline mode",
+      },
+    ];
+    const ephemeralPersonas: PersonaConfig[] = [
+      {
+        id: "ephemeral-one",
+        name: "Ephemeral Analyst",
+        description: "fills missing perspective",
+        methodology: "generated method",
+      },
+    ];
+    setCustomPersonas(customPersonas);
+
+    const harness = createHarness([
+      resolveStep(JSON.stringify(ephemeralPersonas)),
+      resolveStep(customDecomposeAssignmentsOutput([...customPersonas, ...ephemeralPersonas])),
+      resolveStep("research-only"),
+      resolveStep("research-ephemeral"),
+      resolveStep("debate-only"),
+      resolveStep("debate-ephemeral"),
+      resolveStep("final synthesis"),
+    ]);
+
+    const pipeline = new HydraPipeline(createPipelineConfig(1, true, customPersonas.length + 1), harness.deps);
+    await pipeline.run("fill missing personas for query");
+
+    expect(harness.modelInputs[0]!.systemPrompt)
+      .toBe("You are a persona designer. Return ONLY a valid JSON array of analyst personas.");
+    expect(harness.modelInputs[0]!.userPrompt).toContain(
+      'Generate 1 distinct analyst personas best suited to research: "fill missing personas for query"',
+    );
+    expect(harness.modelInputs).toHaveLength(7);
+    expect(harness.modelInputs[1]!.userPrompt).toContain("- Ephemeral Analyst: fills missing perspective");
+  });
+
+  test("throws when custom-personas-only ends with an empty persona pool", async () => {
+    const harness = createHarness([resolveStep("[]"), resolveStep("[]"), resolveStep("[]")]);
+
+    const pipeline = new HydraPipeline(createPipelineConfig(1, true, 2), harness.deps);
+
+    await expect(pipeline.run("fill none")).rejects.toThrow(
+      "custom-personas-only mode requires at least 1 persona; define custom personas with `hydra persona add` or increase agent count",
+    );
+    expect(harness.runFailures.at(-1)).toBe(
+      "custom-personas-only mode requires at least 1 persona; define custom personas with `hydra persona add` or increase agent count",
+    );
+    expect(harness.modelInputs).toHaveLength(3);
   });
 });

@@ -1,4 +1,72 @@
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+
+import { CONFIG_DIR } from "../config";
 import type { PersonaConfig } from "../types";
+
+const PERSONA_ID_PATTERN = /^[a-z0-9-]+$/;
+
+function trimPersonaValue(value: string): string {
+  return value.trim();
+}
+
+function normalizePersona(persona: PersonaConfig): PersonaConfig {
+  return {
+    id: trimPersonaValue(persona.id).toLowerCase(),
+    name: trimPersonaValue(persona.name),
+    description: trimPersonaValue(persona.description),
+    methodology: trimPersonaValue(persona.methodology),
+  };
+}
+
+function isPersonaConfig(value: unknown): value is PersonaConfig {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<PersonaConfig>;
+  if (
+    typeof candidate.id !== "string" ||
+    typeof candidate.name !== "string" ||
+    typeof candidate.description !== "string" ||
+    typeof candidate.methodology !== "string"
+  ) {
+    return false;
+  }
+
+  const normalized = normalizePersona({
+    id: candidate.id,
+    name: candidate.name,
+    description: candidate.description,
+    methodology: candidate.methodology,
+  });
+  return (
+    normalized.id.length > 0 &&
+    PERSONA_ID_PATTERN.test(normalized.id) &&
+    normalized.name.length > 0 &&
+    normalized.description.length > 0 &&
+    normalized.methodology.length > 0
+  );
+}
+
+function ensurePersonasDirectoryExists(): void {
+  const personasDirectory = dirname(PERSONAS_FILE);
+  if (!existsSync(personasDirectory)) {
+    mkdirSync(personasDirectory, { recursive: true, mode: 0o700 });
+  }
+}
+
+/** location of custom personas persisted on disk. */
+export let PERSONAS_FILE = resolve(CONFIG_DIR, "personas.json");
+
+/** set custom personas storage path for tests or controlled environments. */
+export function setPersonasFile(path: string): void {
+  PERSONAS_FILE = path;
+}
+
+/** return current custom personas storage path. */
+export function getPersonasFile(): string {
+  return PERSONAS_FILE;
+}
 
 /** complete set of built-in personas used by orchestration phases. */
 export const PERSONAS: PersonaConfig[] = [
@@ -124,16 +192,188 @@ export const PERSONAS: PersonaConfig[] = [
   },
 ];
 
-/** maximum number of available personas. */
-export const MAX_PERSONA_COUNT = PERSONAS.length;
+const BUILTIN_PERSONA_IDS = new Set(PERSONAS.map((persona) => persona.id));
 
-/** find a persona by exact display name. */
+/** number of built-in personas. */
+export const BUILTIN_PERSONA_COUNT = PERSONAS.length;
+
+const EPHEMERAL_PERSONA_PROMPT =
+  "You are a persona designer. Return ONLY a valid JSON array of analyst personas.";
+
+function parsePersonaCandidates(raw: string): unknown[] {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let candidate = trimmed;
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    candidate = fenced[1].trim();
+  } else {
+    const start = trimmed.indexOf("[");
+    const end = trimmed.lastIndexOf("]");
+    if (start === -1 || end <= start) {
+      return [];
+    }
+    candidate = trimmed.slice(start, end + 1).trim();
+  }
+
+  try {
+    const parsed = JSON.parse(candidate);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/** generate additional personas from the model to fill a custom personas shortfall. */
+export async function generateEphemeralPersonas(
+  query: string,
+  count: number,
+  runModel: (systemPrompt: string, userPrompt: string) => Promise<string>,
+): Promise<PersonaConfig[]> {
+  const targetCount = Math.max(0, count);
+  if (targetCount === 0) {
+    return [];
+  }
+
+  const personas: PersonaConfig[] = [];
+  const usedIds = new Set<string>();
+
+  const missingPrompt = (remaining: number) =>
+    `Generate ${remaining} distinct analyst personas best suited to research: "${query}". Return a JSON array where each object has: id (lowercase-alphanumeric-hyphens), name, description (one sentence), methodology (short phrase). No markdown, no explanation.`;
+
+  for (let attempt = 0; attempt < 3 && personas.length < targetCount; attempt += 1) {
+    const remaining = targetCount - personas.length;
+    const userPrompt = missingPrompt(remaining);
+    const raw = await runModel(EPHEMERAL_PERSONA_PROMPT, userPrompt);
+    const candidates = parsePersonaCandidates(raw);
+
+    for (const candidate of candidates) {
+      if (!isPersonaConfig(candidate)) {
+        continue;
+      }
+
+      const normalized = normalizePersona(candidate);
+      if (usedIds.has(normalized.id)) {
+        continue;
+      }
+
+      usedIds.add(normalized.id);
+      personas.push(normalized);
+      if (personas.length >= targetCount) {
+        break;
+      }
+    }
+  }
+
+  return personas.slice(0, targetCount);
+}
+
+/** load and normalize all custom personas from config storage. */
+export function loadCustomPersonas(): PersonaConfig[] {
+  try {
+    if (!existsSync(PERSONAS_FILE)) {
+      return [];
+    }
+
+    const raw = readFileSync(PERSONAS_FILE, "utf8").trim();
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every(isPersonaConfig)) {
+      return [];
+    }
+    return parsed.map((value) => normalizePersona(value));
+  } catch {
+    return [];
+  }
+}
+
+/** write custom personas list to disk with restricted file permissions. */
+export function saveCustomPersonas(personas: PersonaConfig[]): void {
+  ensurePersonasDirectoryExists();
+  writeFileSync(PERSONAS_FILE, JSON.stringify(personas, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  chmodSync(PERSONAS_FILE, 0o600);
+}
+
+/** append a new custom persona after validation and persist it. */
+export function addCustomPersona(persona: PersonaConfig): { error?: string } {
+  const candidate = normalizePersona(persona);
+  if (!candidate.id.length) {
+    return { error: "id must be non-empty" };
+  }
+  if (!candidate.name.length) {
+    return { error: "name must be non-empty" };
+  }
+  if (!candidate.description.length) {
+    return { error: "description must be non-empty" };
+  }
+  if (!candidate.methodology.length) {
+    return { error: "methodology must be non-empty" };
+  }
+  if (!PERSONA_ID_PATTERN.test(candidate.id)) {
+    return {
+      error: "id must be lowercase alphanumeric and hyphens only",
+    };
+  }
+  if (BUILTIN_PERSONA_IDS.has(candidate.id)) {
+    return { error: "id already exists" };
+  }
+
+  const customPersonas = loadCustomPersonas();
+  if (customPersonas.some((existing) => existing.id === candidate.id)) {
+    return { error: "id already exists" };
+  }
+
+  try {
+    saveCustomPersonas([...customPersonas, candidate]);
+  } catch {
+    return { error: "failed to persist custom personas" };
+  }
+  return {};
+}
+
+/** remove a custom persona by id from storage. */
+export function removeCustomPersona(id: string): boolean {
+  const normalizedId = trimPersonaValue(id).toLowerCase();
+  if (!normalizedId.length) {
+    return false;
+  }
+
+  const customPersonas = loadCustomPersonas();
+  const filteredPersonas = customPersonas.filter((persona) => persona.id !== normalizedId);
+  if (filteredPersonas.length === customPersonas.length) {
+    return false;
+  }
+
+  try {
+    saveCustomPersonas(filteredPersonas);
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** return built-in and custom personas with built-ins first. */
+export function allPersonas(): PersonaConfig[] {
+  return [...PERSONAS, ...loadCustomPersonas()];
+}
+
+/** find a persona by exact display name from built-ins. */
 export function getPersonaByName(name: string): PersonaConfig | undefined {
   return PERSONAS.find((persona) => persona.name === name);
 }
 
 /** select a stable prefix of personas up to requested count. */
 export function selectPersonas(count: number): PersonaConfig[] {
-  const safeCount = Math.max(1, Math.min(PERSONAS.length, count));
-  return PERSONAS.slice(0, safeCount);
+  const all = allPersonas();
+  const safeCount = Math.max(1, Math.min(all.length, count));
+  return all.slice(0, safeCount);
 }
