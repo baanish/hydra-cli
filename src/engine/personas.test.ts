@@ -124,6 +124,20 @@ describe("personas storage helpers", () => {
     expect(loadCustomPersonas()).toEqual([]);
   });
 
+  test("removeCustomPersona matches ids case-insensitively", () => {
+    const created = addCustomPersona({
+      id: "My-Custom-ID",
+      name: "Custom Casing Persona",
+      description: "Description",
+      methodology: "Method",
+    } as PersonaConfig);
+    expect(created.error).toBeUndefined();
+
+    const removed = removeCustomPersona("MY-CUSTOM-ID");
+    expect(removed).toBe(true);
+    expect(loadCustomPersonas()).toEqual([]);
+  });
+
   test("allPersonas returns built-ins plus custom entries", () => {
     const added = addCustomPersona({
       id: "custom-one",

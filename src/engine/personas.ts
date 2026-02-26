@@ -1,5 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 
 import { CONFIG_DIR } from "../config";
 import type { PersonaConfig } from "../types";
@@ -49,8 +49,9 @@ function isPersonaConfig(value: unknown): value is PersonaConfig {
 }
 
 function ensurePersonasDirectoryExists(): void {
-  if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
+  const personasDirectory = dirname(PERSONAS_FILE);
+  if (!existsSync(personasDirectory)) {
+    mkdirSync(personasDirectory, { recursive: true, mode: 0o700 });
   }
 }
 
@@ -198,16 +199,16 @@ export const MAX_PERSONA_COUNT = PERSONAS.length;
 
 /** load and normalize all custom personas from config storage. */
 export function loadCustomPersonas(): PersonaConfig[] {
-  if (!existsSync(PERSONAS_FILE)) {
-    return [];
-  }
-
-  const raw = readFileSync(PERSONAS_FILE, "utf8").trim();
-  if (!raw) {
-    return [];
-  }
-
   try {
+    if (!existsSync(PERSONAS_FILE)) {
+      return [];
+    }
+
+    const raw = readFileSync(PERSONAS_FILE, "utf8").trim();
+    if (!raw) {
+      return [];
+    }
+
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || !parsed.every(isPersonaConfig)) {
       return [];
@@ -263,7 +264,7 @@ export function addCustomPersona(persona: PersonaConfig): { error?: string } {
 
 /** remove a custom persona by id from storage. */
 export function removeCustomPersona(id: string): boolean {
-  const normalizedId = trimPersonaValue(id);
+  const normalizedId = trimPersonaValue(id).toLowerCase();
   if (!normalizedId.length) {
     return false;
   }

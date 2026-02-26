@@ -36,7 +36,7 @@ export interface PipelineConfig {
 export type PipelineDependencies = {
   runModel: typeof runModelWithOptionalTools;
   runWithConcurrency: typeof runWithConcurrency;
-  personas: PersonaConfig[];
+  personas: PersonaConfig[] | (() => PersonaConfig[]);
   createRun: typeof createRun;
   createAgentRun: typeof createAgentRun;
   completeAgentRun: typeof completeAgentRun;
@@ -50,7 +50,7 @@ export type PipelineDependencies = {
 const DEFAULT_DEPENDENCIES: PipelineDependencies = {
   runModel: runModelWithOptionalTools,
   runWithConcurrency,
-  personas: allPersonas(),
+  personas: () => allPersonas(),
   createRun,
   createAgentRun,
   completeAgentRun,
@@ -120,7 +120,7 @@ export class HydraPipeline extends EventEmitter {
     } satisfies PipelineEvent);
 
     try {
-      const allPersonas = this.#deps.personas;
+      const allPersonas = this.resolvePersonas();
       const decomposedAssignments = await this.decompose(query, run.id, allPersonas);
       const selectedPersonas = decomposedAssignments.map(({ persona }) => persona);
 
@@ -799,5 +799,9 @@ export class HydraPipeline extends EventEmitter {
       systemPrompt: record.systemPrompt,
       output: record.output,
     };
+  }
+
+  private resolvePersonas(): PersonaConfig[] {
+    return typeof this.#deps.personas === "function" ? this.#deps.personas() : this.#deps.personas;
   }
 }
