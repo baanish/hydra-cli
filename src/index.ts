@@ -49,6 +49,8 @@ const configKeyMap: Record<string, keyof HydraConfig> = {
   "brave-api-key": "braveApiKey",
   "base-url": "baseUrl",
   model: "model",
+  "orchestrator-model": "orchestratorModel",
+  "research-model": "researchModel",
   "default-agent-count": "defaultAgentCount",
   "max-concurrency": "maxConcurrency",
   "debate-rounds": "debateRounds",
@@ -408,7 +410,9 @@ const runCommand = new Command("run")
     const pipelineConfig: PipelineConfig = {
       apiKey: modelApiKey,
       baseUrl: config.baseUrl,
-      model: config.model,
+      model: resolvedModel,
+      orchestratorModel: config.orchestratorModel ?? resolvedModel,
+      researchModel: config.researchModel ?? resolvedModel,
       searchConfig,
       agentCount,
       maxConcurrency: config.maxConcurrency,
@@ -743,14 +747,14 @@ const configSetCommand = new Command("set")
   .description("set a config value")
   .argument(
     "<key>",
-    "api-key | synthetic-api-key | search-provider | exa-api-key | brave-api-key | model | base-url | default-agent-count | max-concurrency | debate-rounds | search-enabled | custom-personas-only",
+    "api-key | synthetic-api-key | search-provider | exa-api-key | brave-api-key | model | orchestrator-model | research-model | base-url | default-agent-count | max-concurrency | debate-rounds | search-enabled | custom-personas-only",
   )
   .argument("<value>")
   .action((key: string, rawValue: string) => {
     const mapped = configKeyMap[key];
     if (!mapped) {
       throw new Error(
-        "invalid key. valid keys: api-key, synthetic-api-key, search-provider, exa-api-key, brave-api-key, model, base-url, default-agent-count, max-concurrency, debate-rounds, search-enabled, custom-personas-only",
+        "invalid key. valid keys: api-key, synthetic-api-key, search-provider, exa-api-key, brave-api-key, model, orchestrator-model, research-model, base-url, default-agent-count, max-concurrency, debate-rounds, search-enabled, custom-personas-only",
       );
     }
 

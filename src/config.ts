@@ -136,6 +136,12 @@ function applyEnvironmentOverrides(config: HydraConfigFile): HydraConfigFile {
   if (process.env.HYDRA_MODEL) {
     merged.model = process.env.HYDRA_MODEL;
   }
+  if (process.env.HYDRA_ORCHESTRATOR_MODEL) {
+    merged.orchestratorModel = process.env.HYDRA_ORCHESTRATOR_MODEL;
+  }
+  if (process.env.HYDRA_RESEARCH_MODEL) {
+    merged.researchModel = process.env.HYDRA_RESEARCH_MODEL;
+  }
   if (process.env.HYDRA_BASE_URL) {
     merged.baseUrl = process.env.HYDRA_BASE_URL;
   }
@@ -168,6 +174,8 @@ function normalizeConfig(config: HydraConfig): HydraConfig {
     braveApiKey: trimOptionalApiKey(config.braveApiKey),
     baseUrl: config.baseUrl || DEFAULTS.baseUrl,
     model: config.model || DEFAULTS.model,
+    orchestratorModel: trimOptionalApiKey(config.orchestratorModel),
+    researchModel: trimOptionalApiKey(config.researchModel),
     defaultAgentCount: clampInt(config.defaultAgentCount, 1, 20, DEFAULTS.defaultAgentCount),
     maxConcurrency: clampInt(config.maxConcurrency, 1, 1, DEFAULTS.maxConcurrency),
     debateRounds: clampInt(
@@ -305,7 +313,7 @@ export function sanitizeConfigValueForSet(
     return { value: parsed };
   }
 
-  if (key === "baseUrl" || key === "model" || key === "syntheticApiKey") {
+  if (key === "baseUrl" || key === "model" || key === "syntheticApiKey" || key === "orchestratorModel" || key === "researchModel") {
     return { value: value.trim() }; 
   }
 

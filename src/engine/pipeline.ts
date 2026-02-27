@@ -26,6 +26,8 @@ export interface PipelineConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  orchestratorModel?: string;
+  researchModel?: string;
   searchConfig: SearchConfig;
   agentCount: number;
   maxConcurrency: number;
@@ -80,6 +82,8 @@ const MAX_DEBATE_CONTEXT_CHARS = 3200;
 export class HydraPipeline extends EventEmitter {
   #config: PipelineConfig;
   #deps: PipelineDependencies;
+  #orchestratorModel: string;
+  #researchModel: string;
   #totalPromptTokens = 0;
   #totalCompletionTokens = 0;
 
@@ -87,6 +91,8 @@ export class HydraPipeline extends EventEmitter {
   constructor(config: PipelineConfig, dependencies: Partial<PipelineDependencies> = {}) {
     super();
     this.#config = config;
+    this.#orchestratorModel = config.orchestratorModel ?? config.model;
+    this.#researchModel = config.researchModel ?? config.model;
     this.#deps = {
       ...DEFAULT_DEPENDENCIES,
       ...dependencies,
@@ -133,6 +139,7 @@ export class HydraPipeline extends EventEmitter {
             async (systemPrompt, userPrompt) => {
               const result = await this.runModel({
                 runId: run.id,
+                model: this.#orchestratorModel,
                 systemPrompt,
                 userPrompt,
                 allowTools: false,
@@ -237,6 +244,7 @@ export class HydraPipeline extends EventEmitter {
 
     const result = await this.runModel({
       runId,
+      model: this.#orchestratorModel,
       systemPrompt: ORCHESTRATOR_PROMPT,
       userPrompt: decomposePrompt,
       allowTools: false,
@@ -294,6 +302,7 @@ export class HydraPipeline extends EventEmitter {
 
           const result = await this.runModel({
             runId,
+            model: this.#researchModel,
             systemPrompt: RESEARCH_PROMPT(item.persona),
             userPrompt: this.formatCodeBlock(item.assignment.subQuestion),
             allowTools: this.#config.searchEnabled,
@@ -470,6 +479,7 @@ export class HydraPipeline extends EventEmitter {
           };
           const result = await this.runModel({
             runId,
+            model: this.#researchModel,
             systemPrompt: item.prompt,
             userPrompt: item.assignmentMessage,
             allowTools: false,
@@ -579,6 +589,7 @@ export class HydraPipeline extends EventEmitter {
 
     const result = await this.runModel({
       runId,
+      model: this.#orchestratorModel,
       systemPrompt: SYNTHESIS_PROMPT,
       userPrompt,
       allowTools: false,
@@ -589,6 +600,7 @@ export class HydraPipeline extends EventEmitter {
 
   private async runModel(input: {
     runId: string;
+    model: string;
     systemPrompt: string;
     userPrompt: string;
     allowTools?: boolean;
@@ -598,7 +610,7 @@ export class HydraPipeline extends EventEmitter {
     const result = await this.#deps.runModel({
       apiKey: this.#config.apiKey,
       baseUrl: this.#config.baseUrl,
-      model: this.#config.model,
+      model: input.model,
       searchConfig: this.#config.searchConfig,
       systemPrompt: input.systemPrompt,
       userPrompt: input.userPrompt,

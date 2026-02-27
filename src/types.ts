@@ -63,6 +63,8 @@ export interface Config {
   braveApiKey?: string;
   baseUrl: string;
   model: string;
+  orchestratorModel?: string;
+  researchModel?: string;
   defaultAgentCount: number;
   maxConcurrency: number;
   debateRounds: number;
