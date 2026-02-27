@@ -70,14 +70,19 @@ function normalizeSearchProvider(value: unknown): SearchProvider {
   return DEFAULTS.searchProvider;
 }
 
-/** trim optional api key strings and convert blank values to undefined. */
-function trimOptionalApiKey(value: unknown): string | undefined {
+/** trim optional string values and convert blank values to undefined. */
+function trimOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** trim optional api key strings and convert blank values to undefined. */
+function trimOptionalApiKey(value: unknown): string | undefined {
+  return trimOptionalString(value);
 }
 
 /** ensure the config directory exists before read/write operations. */
@@ -174,8 +179,8 @@ function normalizeConfig(config: HydraConfig): HydraConfig {
     braveApiKey: trimOptionalApiKey(config.braveApiKey),
     baseUrl: config.baseUrl || DEFAULTS.baseUrl,
     model: config.model || DEFAULTS.model,
-    orchestratorModel: trimOptionalApiKey(config.orchestratorModel),
-    researchModel: trimOptionalApiKey(config.researchModel),
+    orchestratorModel: trimOptionalString(config.orchestratorModel),
+    researchModel: trimOptionalString(config.researchModel),
     defaultAgentCount: clampInt(config.defaultAgentCount, 1, 20, DEFAULTS.defaultAgentCount),
     maxConcurrency: clampInt(config.maxConcurrency, 1, 1, DEFAULTS.maxConcurrency),
     debateRounds: clampInt(
