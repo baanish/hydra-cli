@@ -326,7 +326,11 @@ export function sanitizeConfigValueForSet(
     return { value: trimOptionalString(value) };
   }
 
-  if (key === "apiKey" || key === "exaApiKey" || key === "braveApiKey") {
+  if (key === "apiKey") {
+    return { value: trimOptionalString(value) };
+  }
+
+  if (key === "exaApiKey" || key === "braveApiKey") {
     return { value: value.trim() };
   }
 
