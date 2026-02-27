@@ -331,7 +331,7 @@ export function sanitizeConfigValueForSet(
   }
 
   if (key === "exaApiKey" || key === "braveApiKey") {
-    return { value: value.trim() };
+    return { value: trimOptionalString(value) };
   }
 
   if (key === "searchProvider") {
