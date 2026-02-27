@@ -141,10 +141,10 @@ function applyEnvironmentOverrides(config: HydraConfigFile): HydraConfigFile {
   if (process.env.HYDRA_MODEL) {
     merged.model = process.env.HYDRA_MODEL;
   }
-  if (process.env.HYDRA_ORCHESTRATOR_MODEL) {
+  if (process.env.HYDRA_ORCHESTRATOR_MODEL !== undefined) {
     merged.orchestratorModel = process.env.HYDRA_ORCHESTRATOR_MODEL;
   }
-  if (process.env.HYDRA_RESEARCH_MODEL) {
+  if (process.env.HYDRA_RESEARCH_MODEL !== undefined) {
     merged.researchModel = process.env.HYDRA_RESEARCH_MODEL;
   }
   if (process.env.HYDRA_BASE_URL) {
@@ -318,8 +318,12 @@ export function sanitizeConfigValueForSet(
     return { value: parsed };
   }
 
-  if (key === "baseUrl" || key === "model" || key === "syntheticApiKey" || key === "orchestratorModel" || key === "researchModel") {
-    return { value: value.trim() }; 
+  if (key === "baseUrl" || key === "model") {
+    return { value: value.trim() };
+  }
+
+  if (key === "syntheticApiKey" || key === "orchestratorModel" || key === "researchModel") {
+    return { value: trimOptionalString(value) };
   }
 
   if (key === "apiKey" || key === "exaApiKey" || key === "braveApiKey") {
