@@ -23,7 +23,8 @@
     "@opentui/core": "^0.1.81",
     "commander": "^13.1.0",
     "nanoid": "^5.1.5",
-    "openai": "^4.83.0"
+    "openai": "^4.83.0",
+    "unicode-animations": "^1.0.3"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
