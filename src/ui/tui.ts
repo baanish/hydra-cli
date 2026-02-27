@@ -13,6 +13,14 @@ import {
 import { getRunAgentRuns } from "../db/queries";
 import { ETAEstimator, formatDuration } from "../engine/eta";
 import type { AgentPhase, PipelineEvent, RunStatus } from "../types";
+import {
+  DB_SYNC_INTERVAL_MS,
+  PHASE_SPINNER,
+  QUEUED_SPINNER,
+  RUNNING_SPINNER,
+  UI_REFRESH_INTERVAL_MS,
+  spinnerFrameAt,
+} from "./animations";
 
 interface HydraUIOptions {
   concurrency: number;
@@ -43,12 +51,18 @@ function makePlaceholder(agentIndex: number): AgentEntry {
   };
 }
 
-function formatAgentLine(entry: AgentEntry): string {
+function formatAgentLine(entry: AgentEntry, nowMs: number): string {
   if (entry.status === "running") {
-    return `⏳ ${entry.persona} — searching... (${formatDuration(entry.durationMs ?? 0)})`;
+    const runningElapsedMs =
+      entry.startedAt > 0 && Number.isFinite(entry.startedAt)
+        ? Math.max(0, nowMs - entry.startedAt)
+        : Math.max(0, entry.durationMs ?? 0);
+    const spinner = spinnerFrameAt(RUNNING_SPINNER, runningElapsedMs);
+    return `${spinner} ${entry.persona} — searching... (${formatDuration(runningElapsedMs)})`;
   }
   if (entry.status === "queued") {
-    return `🔄 ${entry.persona} — queued`;
+    const spinner = spinnerFrameAt(QUEUED_SPINNER, nowMs);
+    return `${spinner} ${entry.persona} — queued`;
   }
   if (entry.status === "error") {
     return `❌ ${entry.persona} — error (${formatDuration(entry.durationMs ?? 0)}, ${formatSearchLabel(entry.searchCount)})`;
@@ -159,8 +173,10 @@ export class HydraUI {
   #totalCompletionTokens = 0;
   #totalSearches = 0;
   #etaEstimator = new ETAEstimator();
+  #lastDbSyncAt = 0;
 
   #agentEntries: AgentEntry[] = [];
+  #agentRows: TextRenderable[] = [];
   #rootPanel: BoxRenderable | null = null;
   #titleText: TextRenderable | null = null;
   #queryText: TextRenderable | null = null;
@@ -236,13 +252,17 @@ export class HydraUI {
     this.#renderer.requestLive();
     this.#runCreatedAt = Date.now();
     this.#phaseStartedAt = this.#runCreatedAt;
+    this.#lastDbSyncAt = 0;
     this.#tickHandle = setInterval(() => {
-      this.#estimatedMs = Date.now() - this.#phaseStartedAt;
-      this.#syncAgentListFromDb();
-      this.#refreshRunningAgentDurations();
-      this.#refresh();
-    }, 1000);
-    this.#refresh();
+      const now = Date.now();
+      this.#estimatedMs = now - this.#phaseStartedAt;
+      if (now - this.#lastDbSyncAt >= DB_SYNC_INTERVAL_MS) {
+        this.#syncAgentListFromDb();
+      }
+      this.#refreshRunningAgentDurations(now);
+      this.#refresh(now);
+    }, UI_REFRESH_INTERVAL_MS);
+    this.#refresh(Date.now());
   }
 
   /** process all pipeline events and sync UI state. */
@@ -265,6 +285,7 @@ export class HydraUI {
       this.#debateRoundComplete = false;
       this.#runCreatedAt = event.timestamp;
       this.#phaseStartedAt = event.timestamp;
+      this.#lastDbSyncAt = 0;
       this.#etaEstimator.reset();
       this.#agentEntries = makePlaceholders(this.#totalAgents);
       this.#syncAgentListFromDb();
@@ -385,8 +406,10 @@ export class HydraUI {
   }
 
   #syncAgentListFromDb(): void {
+    const syncTimestamp = Date.now();
     if (!this.#runId) {
       this.#totalSearches = this.#agentEntries.reduce((total, entry) => total + entry.searchCount, 0);
+      this.#lastDbSyncAt = syncTimestamp;
       return;
     }
 
@@ -432,6 +455,7 @@ export class HydraUI {
       0,
     );
     this.#rebuildAgentRows();
+    this.#lastDbSyncAt = syncTimestamp;
   }
 
   #rebuildAgentRows(): void {
@@ -443,19 +467,38 @@ export class HydraUI {
       this.#agentListPanel.remove(child.id);
     }
 
+    this.#agentRows = [];
+    const now = Date.now();
     for (const entry of this.#agentEntries) {
       const row = new TextRenderable(this.#renderer, {
-        content: formatAgentLine(entry),
+        content: formatAgentLine(entry, now),
       });
       this.#agentListPanel.add(row);
+      this.#agentRows.push(row);
     }
   }
 
-  #refresh(): void {
+  #refreshAgentRows(nowMs: number): void {
+    if (!this.#agentListPanel || !this.#renderer) {
+      return;
+    }
+
+    if (this.#agentRows.length !== this.#agentEntries.length) {
+      this.#rebuildAgentRows();
+    }
+
+    const rowCount = Math.min(this.#agentRows.length, this.#agentEntries.length);
+    for (let index = 0; index < rowCount; index += 1) {
+      this.#agentRows[index].content = formatAgentLine(this.#agentEntries[index], nowMs);
+    }
+  }
+
+  #refresh(nowMs = Date.now()): void {
     if (!this.#renderer || !this.#titleText || !this.#queryText || !this.#phaseText || !this.#summaryText || !this.#footerText) {
       return;
     }
 
+    this.#refreshAgentRows(nowMs);
     const width = this.#renderer.width;
     const phase = mapStatusForDisplay(
       this.#status,
@@ -469,14 +512,20 @@ export class HydraUI {
     const progressBar = this.#buildProgressBar(completed, totalForDisplay);
     const eta = this.#status === "complete" ? "0s" : this.#etaEstimator.estimate(remaining, this.#concurrency);
     const elapsed = formatDuration(
-      this.#status === "decomposing" ? this.#estimatedMs : Math.max(0, Date.now() - this.#runCreatedAt),
+      this.#status === "decomposing" ? this.#estimatedMs : Math.max(0, nowMs - this.#runCreatedAt),
     );
     const progressText = `${completed}/${totalForDisplay}`;
     const tokens = renderTokens(this.#totalPromptTokens, this.#totalCompletionTokens);
     const errors = this.#agentEntries.filter((entry) => entry.status === "error").length;
+    const phaseElapsedMs = Math.max(0, nowMs - this.#phaseStartedAt);
+    const phaseGlyph = this.#status === "complete"
+      ? "✅"
+      : this.#status === "error"
+        ? "❌"
+        : spinnerFrameAt(PHASE_SPINNER, phaseElapsedMs);
 
     this.#queryText.content = t`Query: ${brightBlack(truncateQuery(this.#query, width))}`;
-    this.#phaseText.content = t`Phase: ${green(phase)} [${progressBar}] ${progressText} agents`;
+    this.#phaseText.content = t`Phase: ${green(`${phaseGlyph} ${phase}`)} [${progressBar}] ${progressText} agents`;
     this.#summaryText.content = t`ETA: ${yellow(eta)} | Elapsed: ${yellow(elapsed)} | Tokens: ${yellow(tokens)}`;
     this.#footerText.content = t`Concurrency: ${magenta(this.#concurrency)} | Searches: ${magenta(this.#totalSearches)} | Errors: ${magenta(errors)}`;
   }
@@ -490,29 +539,17 @@ export class HydraUI {
     return `${"█".repeat(filled)}${"░".repeat(empty)}`;
   }
 
-  #refreshRunningAgentDurations(): void {
+  #refreshRunningAgentDurations(nowMs: number): void {
     if (!this.#agentEntries.length) {
       return;
     }
 
-    let changed = false;
-    const now = Date.now();
     for (const entry of this.#agentEntries) {
       if (entry.status !== "running" || entry.startedAt <= 0 || !Number.isFinite(entry.startedAt)) {
         continue;
       }
 
-      const nextDurationMs = Math.max(0, now - entry.startedAt);
-      if (entry.durationMs === nextDurationMs) {
-        continue;
-      }
-
-      entry.durationMs = nextDurationMs;
-      changed = true;
-    }
-
-    if (changed) {
-      this.#rebuildAgentRows();
+      entry.durationMs = Math.max(0, nowMs - entry.startedAt);
     }
   }
 }
