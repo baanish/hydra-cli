@@ -683,6 +683,8 @@ export async function startWebServer(port: number): Promise<void> {
           apiKey: resolveLlmApiKey(config),
           baseUrl: config.baseUrl,
           model: config.model,
+          orchestratorModel: config.orchestratorModel ?? config.model,
+          researchModel: config.researchModel ?? config.model,
           searchConfig: resolveSearchConfig(config),
           agentCount: resolvedAgentCount,
           maxConcurrency: config.maxConcurrency,

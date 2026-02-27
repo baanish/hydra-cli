@@ -70,14 +70,19 @@ function normalizeSearchProvider(value: unknown): SearchProvider {
   return DEFAULTS.searchProvider;
 }
 
-/** trim optional api key strings and convert blank values to undefined. */
-function trimOptionalApiKey(value: unknown): string | undefined {
+/** trim optional string values and convert blank values to undefined. */
+function trimOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** trim optional api key strings and convert blank values to undefined. */
+function trimOptionalApiKey(value: unknown): string | undefined {
+  return trimOptionalString(value);
 }
 
 /** ensure the config directory exists before read/write operations. */
@@ -136,6 +141,12 @@ function applyEnvironmentOverrides(config: HydraConfigFile): HydraConfigFile {
   if (process.env.HYDRA_MODEL) {
     merged.model = process.env.HYDRA_MODEL;
   }
+  if (process.env.HYDRA_ORCHESTRATOR_MODEL !== undefined) {
+    merged.orchestratorModel = process.env.HYDRA_ORCHESTRATOR_MODEL;
+  }
+  if (process.env.HYDRA_RESEARCH_MODEL !== undefined) {
+    merged.researchModel = process.env.HYDRA_RESEARCH_MODEL;
+  }
   if (process.env.HYDRA_BASE_URL) {
     merged.baseUrl = process.env.HYDRA_BASE_URL;
   }
@@ -168,6 +179,8 @@ function normalizeConfig(config: HydraConfig): HydraConfig {
     braveApiKey: trimOptionalApiKey(config.braveApiKey),
     baseUrl: config.baseUrl || DEFAULTS.baseUrl,
     model: config.model || DEFAULTS.model,
+    orchestratorModel: trimOptionalString(config.orchestratorModel),
+    researchModel: trimOptionalString(config.researchModel),
     defaultAgentCount: clampInt(config.defaultAgentCount, 1, 20, DEFAULTS.defaultAgentCount),
     maxConcurrency: clampInt(config.maxConcurrency, 1, 1, DEFAULTS.maxConcurrency),
     debateRounds: clampInt(
@@ -305,12 +318,20 @@ export function sanitizeConfigValueForSet(
     return { value: parsed };
   }
 
-  if (key === "baseUrl" || key === "model" || key === "syntheticApiKey") {
-    return { value: value.trim() }; 
+  if (key === "baseUrl" || key === "model") {
+    return { value: value.trim() };
   }
 
-  if (key === "apiKey" || key === "exaApiKey" || key === "braveApiKey") {
-    return { value: value.trim() };
+  if (key === "syntheticApiKey" || key === "orchestratorModel" || key === "researchModel") {
+    return { value: trimOptionalString(value) };
+  }
+
+  if (key === "apiKey") {
+    return { value: trimOptionalString(value) };
+  }
+
+  if (key === "exaApiKey" || key === "braveApiKey") {
+    return { value: trimOptionalString(value) };
   }
 
   if (key === "searchProvider") {
