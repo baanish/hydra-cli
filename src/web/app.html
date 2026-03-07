@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="hydra-web-token" content="__HYDRA_WEB_TOKEN__" />
     <title>hydra web</title>
     <style>
       :root {
@@ -471,10 +472,31 @@
       let defaultSearchEnabled = runSearch.checked;
       let agentCountTouched = false;
       let searchTouched = false;
+      const sessionToken =
+        document.querySelector('meta[name="hydra-web-token"]')?.getAttribute("content") || "";
       const THEME_STORAGE_KEY = "hydra-web-theme";
       const DEFAULT_PHASE = "decompose";
       let runModalOpener = null;
       let runModalKeydownHandler = null;
+
+      function apiFetch(input, init = {}) {
+        const headers = new Headers(init.headers || {});
+        if (sessionToken) {
+          headers.set("X-Hydra-Session", sessionToken);
+        }
+        return fetch(input, {
+          ...init,
+          headers,
+        });
+      }
+
+      function eventStreamPath(pathname) {
+        const url = new URL(pathname, window.location.origin);
+        if (sessionToken) {
+          url.searchParams.set("session", sessionToken);
+        }
+        return `${url.pathname}${url.search}`;
+      }
 
       function setRunModalOpen(isOpen, opener = null) {
         runModalOpener = isOpen ? opener : runModalOpener;
@@ -595,7 +617,7 @@
 
       async function loadRunDefaults() {
         try {
-          const response = await fetch("/api/config");
+          const response = await apiFetch("/api/config");
           if (!response.ok) {
             return;
           }
@@ -922,7 +944,7 @@
 
       async function refreshRuns() {
         try {
-          const response = await fetch("/api/runs");
+          const response = await apiFetch("/api/runs");
           if (!response.ok) {
             throw new Error("failed to fetch runs");
           }
@@ -934,7 +956,7 @@
       }
 
       async function fetchRun(runId) {
-        const response = await fetch(`/api/runs/${runId}`);
+        const response = await apiFetch(`/api/runs/${runId}`);
         if (!response.ok) {
           throw new Error(`run not found (${response.status})`);
         }
@@ -1065,7 +1087,7 @@
         };
         state.runId = runId;
 
-        const source = new EventSource(`/api/runs/${runId}/events`);
+        const source = new EventSource(eventStreamPath(`/api/runs/${runId}/events`));
         state.source = source;
 
         source.onmessage = (msg) => {
@@ -1205,7 +1227,7 @@
         runStatus.textContent = "starting run...";
         try {
           const abortController = new AbortController();
-          const response = await fetch("/api/run", {
+          const response = await apiFetch("/api/run", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

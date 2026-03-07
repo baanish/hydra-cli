@@ -12,6 +12,7 @@ import {
 } from "@opentui/core";
 import { getRunAgentRuns } from "../db/queries";
 import { ETAEstimator, formatDuration } from "../engine/eta";
+import { sanitizeForTerminal } from "../security";
 import type { AgentPhase, PipelineEvent, RunStatus } from "../types";
 import {
 	DB_SYNC_INTERVAL_MS,
@@ -124,9 +125,10 @@ function mapStatusForDisplay(
 }
 
 function renderMarkdownAsAnsi(markdown: string): string {
+	const safeMarkdown = sanitizeForTerminal(markdown);
 	const reset = "\x1b[0m";
 	const bold = "\x1b[1m";
-	const heading = markdown.replace(
+	const heading = safeMarkdown.replace(
 		/^##\s*(.*)$/gm,
 		(_match, title) => `${bold}## ${title}${reset}`,
 	);

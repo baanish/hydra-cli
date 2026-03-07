@@ -37,7 +37,7 @@ node -e "console.log(require('./examples/ai-transition-2036.json').brief)"
 | `hydra history` | list recent runs | `hydra history --limit 20` |
 | `hydra config show` | print effective config with masked keys | `hydra config show` |
 | `hydra config set <key> <value>` | update a config value | `hydra config set max-concurrency 5` |
-| `hydra web` | launch local web UI | `hydra web --port 3737` |
+| `hydra web` | launch local web UI with an authenticated local API session | `hydra web --port 3737` |
 
 ## personas
 
@@ -71,4 +71,4 @@ custom personas are stored in `~/.config/hydra-cli/personas.json`. built-in pers
 
 ## note on backend
 
-hydra-cli uses Synthetic.new as the default OpenAI-compatible LLM backend (`baseUrl` + model defaults target Synthetic.new). you can override `baseUrl` and `model` for other compatible endpoints.
+hydra-cli uses Synthetic.new as the default OpenAI-compatible LLM backend (`baseUrl` + model defaults target Synthetic.new). `baseUrl` must use `https://`, or `http://` only for localhost / loopback development endpoints, and embedded URL credentials are rejected.
