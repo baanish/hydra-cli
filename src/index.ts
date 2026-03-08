@@ -535,8 +535,7 @@ const runCommand = new Command("run")
       try {
         writeFileSync(outputPath, result.brief, "utf8");
       } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "unknown error";
+        const message = formatErrorMessage(error) || "unknown error";
         ui?.stop();
         console.error("Error: could not write to file:", message);
         process.exitCode = 1;

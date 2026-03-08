@@ -10,6 +10,7 @@ import {
   updateAgentRun,
   updateRunStatus,
 } from "../db/queries";
+import { formatErrorMessage } from "../security";
 import type {
   AgentRunState,
   DecomposedAssignment,
@@ -88,6 +89,19 @@ type PersonaOutput = {
 };
 
 const MAX_DEBATE_CONTEXT_CHARS = 3200;
+const MAX_PERSISTED_ERROR_CHARS = 200;
+
+function createPersistedErrorSummary(error: unknown, fallback: string): string {
+  const sanitized = formatErrorMessage(error).replace(/\s+/g, " ").trim();
+  const summary = sanitized || fallback;
+  return summary.length <= MAX_PERSISTED_ERROR_CHARS
+    ? summary
+    : `${summary.slice(0, MAX_PERSISTED_ERROR_CHARS - 1)}…`;
+}
+
+function logProcessError(context: string, error: unknown): void {
+  console.error(`[hydra] ${context}`, error);
+}
 
 /** orchestrates a full hydra run across decomposition, research, debate, and synthesis. */
 export class HydraPipeline extends EventEmitter {
@@ -239,9 +253,12 @@ export class HydraPipeline extends EventEmitter {
 
       return { runId: completedRun.id, brief };
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "pipeline failed";
-      const failedRun = this.#deps.markRunFailed(run.id, message);
+      const sanitizedSummary = createPersistedErrorSummary(
+        error,
+        "pipeline failed",
+      );
+      logProcessError(`pipeline run failed for ${run.id}:`, error);
+      const failedRun = this.#deps.markRunFailed(run.id, sanitizedSummary);
       this.emit("run-status-changed", {
         type: "run-status-changed",
         runId: failedRun.id,
@@ -384,11 +401,17 @@ export class HydraPipeline extends EventEmitter {
             status: "complete",
           };
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "research agent failed";
+          const sanitizedSummary = createPersistedErrorSummary(
+            error,
+            "research agent failed",
+          );
+          logProcessError(
+            `research agent failed for ${item.persona.name}:`,
+            error,
+          );
           const completed = this.#deps.completeAgentRun(
             item.agentRun.id,
-            message,
+            sanitizedSummary,
             {
               status: "error",
             },
@@ -580,11 +603,17 @@ export class HydraPipeline extends EventEmitter {
             status: "complete",
           };
         } catch (error) {
-          const message =
-            error instanceof Error ? error.message : "debate agent failed";
+          const sanitizedSummary = createPersistedErrorSummary(
+            error,
+            "debate agent failed",
+          );
+          logProcessError(
+            `debate agent failed for ${item.persona.name}:`,
+            error,
+          );
           const completed = this.#deps.completeAgentRun(
             item.agentRun.id,
-            message,
+            sanitizedSummary,
             {
               status: "error",
             },
@@ -794,7 +823,7 @@ export class HydraPipeline extends EventEmitter {
 
     const fromFence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
     const candidate =
-      fromFence?.[1]?.trim() ?? this.extractBracketPayload(trimmed);
+      fromFence?.[1]?.trim() || this.extractBracketPayload(trimmed);
     if (!candidate) {
       return [];
     }

@@ -15,6 +15,10 @@ describe("security helpers", () => {
     expect(sanitizeForTerminal(raw)).toBe("hello redlink");
   });
 
+  test("sanitizeForTerminal strips carriage returns", () => {
+    expect(sanitizeForTerminal("hello\rworld")).toBe("helloworld");
+  });
+
   test("formatUpstreamHttpError collapses noisy upstream bodies", () => {
     const error = formatUpstreamHttpError(
       "Synthetic",

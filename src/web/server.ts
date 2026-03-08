@@ -360,12 +360,20 @@ function isEventStreamRequest(req: Request): boolean {
   return req.headers.get("accept")?.includes("text/event-stream") ?? false;
 }
 
-function readProvidedSessionToken(req: Request, url: URL): string {
+function isSseEventsRoute(pathname: string): boolean {
+  return pathname.endsWith("/events") && parseRunId(pathname) !== null;
+}
+
+function readProvidedSessionToken(
+  req: Request,
+  url: URL,
+  pathname: string,
+): string {
   const headerToken = req.headers.get(API_SESSION_HEADER)?.trim();
   if (headerToken) {
     return headerToken;
   }
-  if (!isEventStreamRequest(req)) {
+  if (!isEventStreamRequest(req) || !isSseEventsRoute(pathname)) {
     return "";
   }
   return url.searchParams.get("session")?.trim() ?? "";
@@ -389,6 +397,7 @@ function isAuthorizedSessionToken(
 function authorizeApiRequest(
   req: Request,
   url: URL,
+  pathname: string,
   sessionToken: string,
 ): Response | null {
   if (!isLoopbackHostname(url.hostname)) {
@@ -410,7 +419,7 @@ function authorizeApiRequest(
     return jsonResponse({ error: "forbidden request origin" }, 403);
   }
 
-  const providedToken = readProvidedSessionToken(req, url);
+  const providedToken = readProvidedSessionToken(req, url, pathname);
   if (!isAuthorizedSessionToken(sessionToken, providedToken)) {
     return jsonResponse({ error: "unauthorized" }, 401);
   }
@@ -709,7 +718,12 @@ export async function startWebServer(port: number): Promise<void> {
       }
 
       if (apiRequest) {
-        const authFailure = authorizeApiRequest(req, url, sessionToken);
+        const authFailure = authorizeApiRequest(
+          req,
+          url,
+          pathname,
+          sessionToken,
+        );
         if (authFailure) {
           return authFailure;
         }
