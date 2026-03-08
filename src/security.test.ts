@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  formatErrorMessage,
   formatUpstreamHttpError,
   isLoopbackHostname,
   sanitizeForTerminal,
@@ -51,6 +52,19 @@ describe("security helpers", () => {
       "http://127.0.0.1:11434/v1",
     );
     expect(validateBaseUrl("http://example.com/v1").error).toContain("https");
+  });
+
+  test("validateBaseUrl rejects query strings and fragments", () => {
+    expect(validateBaseUrl("https://api.example.com/v1?debug=1").error).toBe(
+      "base-url must not contain query strings or fragments",
+    );
+    expect(validateBaseUrl("https://api.example.com/v1#frag").error).toBe(
+      "base-url must not contain query strings or fragments",
+    );
+  });
+
+  test("formatErrorMessage flattens whitespace to one line", () => {
+    expect(formatErrorMessage(new Error("bad\t\nerror"))).toBe("bad error");
   });
 
   test("isLoopbackHostname recognizes localhost aliases", () => {

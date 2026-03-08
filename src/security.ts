@@ -169,6 +169,10 @@ export function validateBaseUrl(value: string): {
     return { error: "base-url must not contain embedded credentials" };
   }
 
+  if (parsed.search || parsed.hash) {
+    return { error: "base-url must not contain query strings or fragments" };
+  }
+
   if (parsed.protocol === "http:" && !isLoopbackHostname(parsed.hostname)) {
     return {
       error: "base-url must use https, or http only for localhost/loopback",
@@ -196,6 +200,6 @@ export function isLoopbackHostname(hostname: string): boolean {
 /** extract a safe terminal-facing error message. */
 export function formatErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const sanitized = sanitizeForTerminal(raw).trim();
+  const sanitized = sanitizeForTerminal(raw).replace(/\s+/g, " ").trim();
   return sanitized || "unknown error";
 }
