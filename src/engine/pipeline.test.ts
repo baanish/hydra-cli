@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ModelRunResult } from "./model";
-import { HydraPipeline, type PipelineDependencies } from "./pipeline";
-import { getPersonasFile, setPersonasFile } from "./personas";
 import type { PersonaConfig } from "../types";
+import type { ModelRunResult } from "./model";
+import { getPersonasFile, setPersonasFile } from "./personas";
+import { HydraPipeline, type PipelineDependencies } from "./pipeline";
 
 type ModelStep =
   | {
@@ -129,7 +129,11 @@ function createHarness(steps: ModelStep[]) {
     ): Promise<R[]> => {
       const output: R[] = [];
       for (let index = 0; index < items.length; index += 1) {
-        output.push(await fn(items[index]!, index));
+        const item = items[index];
+        if (item === undefined) {
+          throw new Error(`missing item at index ${index}`);
+        }
+        output.push(await fn(item, index));
       }
       return output;
     },
@@ -375,6 +379,44 @@ describe("HydraPipeline", () => {
     expect(harness.addTokenUsageCalls[0]?.[2]).toBe(1);
   });
 
+  test("sanitizes persona names in research failure logs", async () => {
+    const originalConsoleError = console.error;
+    const loggedLines: string[] = [];
+    console.error = (...args: unknown[]) => {
+      loggedLines.push(String(args[0] ?? ""));
+    };
+
+    try {
+      const unsafePersona: PersonaConfig = {
+        id: "unsafe-research",
+        name: "Unsafe\x1b[31mPersona",
+        description: "custom",
+        methodology: "custom method",
+      };
+      const harness = createHarness([
+        resolveStep(customDecomposeAssignmentsOutput([unsafePersona])),
+        rejectStep("research exploded"),
+      ]);
+
+      const pipeline = new HydraPipeline(
+        createPipelineConfig(1, false, 1),
+        { ...harness.deps, personas: [unsafePersona] },
+      );
+
+      await expect(pipeline.run("q")).rejects.toThrow(
+        "research phase failed: 0/1 agents succeeded",
+      );
+
+      expect(loggedLines.some((line) => line.includes("\x1b"))).toBe(false);
+      expect(
+        loggedLines.some((line) =>
+          line.includes("[hydra] research agent failed for UnsafePersona:")),
+      ).toBe(true);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   test("tolerates partial debate failures when at least two agents succeed", async () => {
     const harness = createHarness([
       resolveStep(decomposeAssignmentsOutput()),
@@ -413,7 +455,48 @@ describe("HydraPipeline", () => {
     expect(harness.addTokenUsageCalls).toHaveLength(5);
   });
 
+  test("sanitizes persona names in debate failure logs", async () => {
+    const originalConsoleError = console.error;
+    const loggedLines: string[] = [];
+    console.error = (...args: unknown[]) => {
+      loggedLines.push(String(args[0] ?? ""));
+    };
+
+    try {
+      const unsafePersona: PersonaConfig = {
+        id: "unsafe-debate",
+        name: "Unsafe\x1b[31mDebater",
+        description: "custom",
+        methodology: "custom method",
+      };
+      const harness = createHarness([
+        resolveStep(customDecomposeAssignmentsOutput([unsafePersona])),
+        resolveStep("research-a"),
+        rejectStep("debate exploded"),
+      ]);
+
+      const pipeline = new HydraPipeline(
+        createPipelineConfig(1, false, 1),
+        { ...harness.deps, personas: [unsafePersona] },
+      );
+
+      await expect(pipeline.run("q")).rejects.toThrow(
+        "debate round 1 failed: 0/1 agents succeeded",
+      );
+
+      expect(loggedLines.some((line) => line.includes("\x1b"))).toBe(false);
+      expect(
+        loggedLines.some((line) =>
+          line.includes("[hydra] debate agent failed for UnsafeDebater:")),
+      ).toBe(true);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   test("allows single-agent debate rounds to complete", async () => {
+    const singlePersona = TEST_PERSONAS[0];
+    expect(singlePersona).toBeDefined();
     const harness = createHarness([
       resolveStep(decomposeAssignmentsOutput()),
       resolveStep("research-a"),
@@ -426,7 +509,7 @@ describe("HydraPipeline", () => {
         ...createPipelineConfig(1, false, 1),
         searchEnabled: false,
       },
-      { ...harness.deps, personas: [TEST_PERSONAS[0]!] },
+      { ...harness.deps, personas: singlePersona ? [singlePersona] : [] },
     );
 
     const result = await pipeline.run("q");
@@ -488,9 +571,10 @@ describe("HydraPipeline", () => {
 
     await pipeline.run("what is custom enough");
 
-    expect(harness.modelInputs[0]!.userPrompt).toContain("- Custom Alpha: maps risk with constraints");
-    expect(harness.modelInputs[0]!.userPrompt).toContain("- Custom Beta: finds execution details");
-    expect(harness.modelInputs[0]!.userPrompt).not.toContain("The Skeptic");
+    expect(harness.modelInputs[0]).toBeDefined();
+    expect(harness.modelInputs[0]?.userPrompt).toContain("- Custom Alpha: maps risk with constraints");
+    expect(harness.modelInputs[0]?.userPrompt).toContain("- Custom Beta: finds execution details");
+    expect(harness.modelInputs[0]?.userPrompt).not.toContain("The Skeptic");
   });
 
   test("generates ephemeral personas to fill custom-personas-only shortfall", async () => {
@@ -525,13 +609,15 @@ describe("HydraPipeline", () => {
     const pipeline = new HydraPipeline(createPipelineConfig(1, true, customPersonas.length + 1), harness.deps);
     await pipeline.run("fill missing personas for query");
 
-    expect(harness.modelInputs[0]!.systemPrompt)
+    expect(harness.modelInputs[0]).toBeDefined();
+    expect(harness.modelInputs[0]?.systemPrompt)
       .toBe("You are a persona designer. Return ONLY a valid JSON array of analyst personas.");
-    expect(harness.modelInputs[0]!.userPrompt).toContain(
+    expect(harness.modelInputs[0]?.userPrompt).toContain(
       'Generate 1 distinct analyst personas best suited to research: "fill missing personas for query"',
     );
     expect(harness.modelInputs).toHaveLength(7);
-    expect(harness.modelInputs[1]!.userPrompt).toContain("- Ephemeral Analyst: fills missing perspective");
+    expect(harness.modelInputs[1]).toBeDefined();
+    expect(harness.modelInputs[1]?.userPrompt).toContain("- Ephemeral Analyst: fills missing perspective");
   });
 
   test("throws when custom-personas-only ends with an empty persona pool", async () => {

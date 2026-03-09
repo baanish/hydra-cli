@@ -10,7 +10,7 @@ import {
   updateAgentRun,
   updateRunStatus,
 } from "../db/queries";
-import { formatErrorMessage } from "../security";
+import { formatErrorMessage, sanitizeForTerminal } from "../security";
 import type {
   AgentRunState,
   DecomposedAssignment,
@@ -100,7 +100,7 @@ function createPersistedErrorSummary(error: unknown, fallback: string): string {
 }
 
 function logProcessError(context: string, error: unknown): void {
-  console.error(`[hydra] ${context}`, error);
+  console.error(`[hydra] ${sanitizeForTerminal(context)}`, error);
 }
 
 /** orchestrates a full hydra run across decomposition, research, debate, and synthesis. */
