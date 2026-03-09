@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -5,7 +6,14 @@ import { fileURLToPath } from "node:url";
 import { clampInt, loadConfig, maskConfigValue } from "../config";
 import { getRun, getRunAgentRuns, listRuns, removeRun } from "../db/queries";
 import { HydraPipeline, type PipelineConfig } from "../engine/pipeline";
-import type { AgentRunRecord, AgentRunState, HydraConfig, PipelineEvent, SearchConfig } from "../types";
+import { formatErrorMessage, isLoopbackHostname } from "../security";
+import type {
+  AgentRunRecord,
+  AgentRunState,
+  HydraConfig,
+  PipelineEvent,
+  SearchConfig,
+} from "../types";
 
 type RunSsePayload = PipelineEvent | { type: "done"; runId: string };
 
@@ -14,10 +22,13 @@ type SseClient = {
   close: () => Promise<void>;
 };
 
-const APP_HTML = readFileSync(
+const APP_HTML_TEMPLATE = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "app.html"),
   "utf8",
 );
+const API_SESSION_HEADER = "x-hydra-session";
+const SESSION_TOKEN_PLACEHOLDER = "__HYDRA_WEB_TOKEN__";
+const MAX_WEB_QUERY_CHARS = 20_000;
 
 const activeRunPipelines = new Map<string, HydraPipeline>();
 const activeRunClients = new Map<string, Set<SseClient>>();
@@ -30,14 +41,25 @@ const pipelineEventTypes = [
   "run-complete",
 ] as const;
 
-function createCorsHeaders(contentType?: string): Headers {
+function createSecurityHeaders(contentType?: string): Headers {
   const headers = new Headers();
-  headers.set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  headers.set("Cache-Control", "no-store");
+  headers.set(
+    "Content-Security-Policy",
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; object-src 'none'",
+  );
+  headers.set("Cross-Origin-Resource-Policy", "same-origin");
+  headers.set("Referrer-Policy", "no-referrer");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "DENY");
   if (contentType) {
     headers.set("Content-Type", contentType);
   }
   return headers;
+}
+
+function buildAppHtml(sessionToken: string): string {
+  return APP_HTML_TEMPLATE.replaceAll(SESSION_TOKEN_PLACEHOLDER, sessionToken);
 }
 
 function createSseResponse() {
@@ -69,7 +91,7 @@ function createSseResponse() {
 
   return {
     response: new Response(stream.readable, {
-      headers: createCorsHeaders("text/event-stream"),
+      headers: createSecurityHeaders("text/event-stream"),
     }),
     send,
     close,
@@ -194,12 +216,29 @@ function toState(agentRun: AgentRunRecord): AgentRunState {
     completedAt: agentRun.completedAt,
     promptTokens: agentRun.promptTokens,
     completionTokens: agentRun.completionTokens,
-    systemPrompt: agentRun.systemPrompt,
     output: agentRun.output,
   };
 }
 
-async function replayFromDb(runId: string, send: (event: RunSsePayload) => Promise<void>) {
+function toPublicAgentRun(agentRun: AgentRunRecord) {
+  return {
+    id: agentRun.id,
+    runId: agentRun.runId,
+    phase: agentRun.phase,
+    persona: agentRun.persona,
+    status: agentRun.status,
+    promptTokens: agentRun.promptTokens,
+    completionTokens: agentRun.completionTokens,
+    startedAt: agentRun.startedAt,
+    completedAt: agentRun.completedAt,
+    output: agentRun.output,
+  };
+}
+
+async function replayFromDb(
+  runId: string,
+  send: (event: RunSsePayload) => Promise<void>,
+) {
   const run = getRun(runId);
   if (!run) {
     return;
@@ -212,7 +251,9 @@ async function replayFromDb(runId: string, send: (event: RunSsePayload) => Promi
     timestamp: run.createdAt,
   });
 
-  const records = getRunAgentRuns(run.id).sort((left, right) => left.startedAt - right.startedAt);
+  const records = getRunAgentRuns(run.id).sort(
+    (left, right) => left.startedAt - right.startedAt,
+  );
   const stats = phaseProgress(records);
 
   for (const [phase, summary] of Object.entries(stats)) {
@@ -283,14 +324,15 @@ function parseJsonBody(body: unknown): {
   }
 
   const query = payload.query.trim();
-  if (!query) {
+  if (!query || query.length > MAX_WEB_QUERY_CHARS) {
     return null;
   }
 
   return {
     query,
     agentCount:
-      typeof payload.agentCount === "number" || typeof payload.agentCount === "string"
+      typeof payload.agentCount === "number" ||
+      typeof payload.agentCount === "string"
         ? Number(payload.agentCount)
         : undefined,
     searchEnabled:
@@ -303,8 +345,86 @@ function parseJsonBody(body: unknown): {
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: createCorsHeaders("application/json"),
+    headers: createSecurityHeaders("application/json"),
   });
+}
+
+function textResponse(message: string, status = 200): Response {
+  return new Response(message, {
+    status,
+    headers: createSecurityHeaders("text/plain; charset=utf-8"),
+  });
+}
+
+function isEventStreamRequest(req: Request): boolean {
+  return req.headers.get("accept")?.includes("text/event-stream") ?? false;
+}
+
+function isSseEventsRoute(pathname: string): boolean {
+  return pathname.endsWith("/events") && parseRunId(pathname) !== null;
+}
+
+function readProvidedSessionToken(
+  req: Request,
+  url: URL,
+  pathname: string,
+): string {
+  const headerToken = req.headers.get(API_SESSION_HEADER)?.trim();
+  if (headerToken) {
+    return headerToken;
+  }
+  if (!isEventStreamRequest(req) || !isSseEventsRoute(pathname)) {
+    return "";
+  }
+  return url.searchParams.get("session")?.trim() ?? "";
+}
+
+function isAuthorizedSessionToken(
+  expectedToken: string,
+  providedToken: string,
+): boolean {
+  if (!providedToken) {
+    return false;
+  }
+  const expected = Buffer.from(expectedToken);
+  const provided = Buffer.from(providedToken);
+  if (expected.length !== provided.length) {
+    return false;
+  }
+  return timingSafeEqual(expected, provided);
+}
+
+function authorizeApiRequest(
+  req: Request,
+  url: URL,
+  pathname: string,
+  sessionToken: string,
+): Response | null {
+  if (!isLoopbackHostname(url.hostname)) {
+    return jsonResponse({ error: "forbidden host" }, 403);
+  }
+
+  const secFetchSite = req.headers.get("sec-fetch-site");
+  if (
+    secFetchSite &&
+    secFetchSite !== "same-origin" &&
+    secFetchSite !== "same-site" &&
+    secFetchSite !== "none"
+  ) {
+    return jsonResponse({ error: "forbidden request origin" }, 403);
+  }
+
+  const origin = req.headers.get("origin");
+  if (origin && origin !== url.origin) {
+    return jsonResponse({ error: "forbidden request origin" }, 403);
+  }
+
+  const providedToken = readProvidedSessionToken(req, url, pathname);
+  if (!isAuthorizedSessionToken(sessionToken, providedToken)) {
+    return jsonResponse({ error: "unauthorized" }, 401);
+  }
+
+  return null;
 }
 
 function parseRunId(pathname: string): string | null {
@@ -451,8 +571,9 @@ function routeRunEvents(runId: string, req: Request): Response {
         const initialAgentRuns = getRunAgentRuns(runId);
         const completedAgentRuns = new Set(
           initialAgentRuns
-            .filter((agentRun) =>
-              agentRun.status === "complete" || agentRun.status === "error",
+            .filter(
+              (agentRun) =>
+                agentRun.status === "complete" || agentRun.status === "error",
             )
             .map((agentRun) => agentRun.id),
         );
@@ -512,7 +633,11 @@ function routeRunEvents(runId: string, req: Request): Response {
               await send({
                 type: "agent-progress",
                 runId: polledRun.id,
-                phase: phase as "decompose" | "research" | "debate" | "synthesis",
+                phase: phase as
+                  | "decompose"
+                  | "research"
+                  | "debate"
+                  | "synthesis",
                 completedAgents: summary.completed,
                 totalAgents: summary.total,
                 timestamp: polledRun.completedAt ?? polledRun.createdAt,
@@ -521,10 +646,7 @@ function routeRunEvents(runId: string, req: Request): Response {
           }
 
           for (const agentRun of polledAgentRuns) {
-            if (
-              agentRun.status !== "complete" &&
-              agentRun.status !== "error"
-            ) {
+            if (agentRun.status !== "complete" && agentRun.status !== "error") {
               continue;
             }
             if (completedAgentRuns.has(agentRun.id)) {
@@ -573,6 +695,7 @@ function routeRunEvents(runId: string, req: Request): Response {
 }
 
 export async function startWebServer(port: number): Promise<void> {
+  const sessionToken = randomBytes(24).toString("base64url");
   Bun.serve({
     hostname: "127.0.0.1",
     port,
@@ -581,17 +704,34 @@ export async function startWebServer(port: number): Promise<void> {
       const method = req.method;
       const url = new URL(req.url);
       const pathname = url.pathname;
+      const apiRequest = pathname.startsWith("/api/");
+
+      if (!isLoopbackHostname(url.hostname)) {
+        return textResponse("forbidden host", 403);
+      }
 
       if (method === "OPTIONS") {
         return new Response(null, {
           status: 204,
-          headers: createCorsHeaders("text/plain; charset=utf-8"),
+          headers: createSecurityHeaders("text/plain; charset=utf-8"),
         });
       }
 
+      if (apiRequest) {
+        const authFailure = authorizeApiRequest(
+          req,
+          url,
+          pathname,
+          sessionToken,
+        );
+        if (authFailure) {
+          return authFailure;
+        }
+      }
+
       if (pathname === "/" || pathname === "/index.html") {
-        return new Response(APP_HTML, {
-          headers: createCorsHeaders("text/html; charset=utf-8"),
+        return new Response(buildAppHtml(sessionToken), {
+          headers: createSecurityHeaders("text/html; charset=utf-8"),
         });
       }
 
@@ -602,7 +742,7 @@ export async function startWebServer(port: number): Promise<void> {
         return jsonResponse(toMaskedConfig(loadConfig()));
       }
 
-        if (pathname === "/api/runs") {
+      if (pathname === "/api/runs") {
         if (method !== "GET") {
           return jsonResponse({ error: "method not allowed" }, 405);
         }
@@ -611,7 +751,7 @@ export async function startWebServer(port: number): Promise<void> {
 
       const runId = parseRunId(pathname);
       if (runId) {
-      if (pathname.endsWith("/events")) {
+        if (pathname.endsWith("/events")) {
           if (method !== "GET") {
             return jsonResponse({ error: "method not allowed" }, 405);
           }
@@ -623,7 +763,10 @@ export async function startWebServer(port: number): Promise<void> {
           if (!run) {
             return jsonResponse({ error: "run not found" }, 404);
           }
-          return jsonResponse({ run, agentRuns: getRunAgentRuns(runId) });
+          return jsonResponse({
+            run,
+            agentRuns: getRunAgentRuns(runId).map(toPublicAgentRun),
+          });
         }
 
         if (method === "DELETE") {
@@ -652,13 +795,11 @@ export async function startWebServer(port: number): Promise<void> {
           return jsonResponse({ error: "method not allowed" }, 405);
         }
 
-        let parsedPayload:
-          | {
-              query: string;
-              agentCount?: number;
-              searchEnabled?: boolean;
-            }
-          | null;
+        let parsedPayload: {
+          query: string;
+          agentCount?: number;
+          searchEnabled?: boolean;
+        } | null;
         try {
           parsedPayload = parseJsonBody(await req.json());
         } catch {
@@ -715,10 +856,9 @@ export async function startWebServer(port: number): Promise<void> {
             if (event.runId && !terminalEventHandled) {
               terminalEventHandled = true;
               activeRunPipelines.delete(event.runId);
-              terminalClose = closeRunSubscribers(event.runId)
-                .catch(() => {
-                  // ignore terminal cleanup failures while stream is closing.
-                });
+              terminalClose = closeRunSubscribers(event.runId).catch(() => {
+                // ignore terminal cleanup failures while stream is closing.
+              });
             }
           } else if (
             event.type === "run-status-changed" &&
@@ -727,10 +867,9 @@ export async function startWebServer(port: number): Promise<void> {
             if (!terminalEventHandled) {
               terminalEventHandled = true;
               activeRunPipelines.delete(event.runId);
-              terminalClose = closeRunSubscribers(event.runId)
-                .catch(() => {
-                  // ignore terminal cleanup failures while stream is closing.
-                });
+              terminalClose = closeRunSubscribers(event.runId).catch(() => {
+                // ignore terminal cleanup failures while stream is closing.
+              });
             }
           }
         };
@@ -758,7 +897,9 @@ export async function startWebServer(port: number): Promise<void> {
           try {
             await pipeline.run(parsedPayload.query);
           } catch (error) {
-            console.error(`pipeline failed to start run ${runId}`, error);
+            console.error(
+              `[hydra] pipeline failed to start run ${runId ?? "unknown"}: ${formatErrorMessage(error)}`,
+            );
             if (runId && !terminalEventHandled) {
               activeRunPipelines.delete(runId);
               try {
@@ -771,10 +912,9 @@ export async function startWebServer(port: number): Promise<void> {
               } catch {
                 // ignore write failures for aborted bootstrap streams.
               }
-              terminalClose = closeRunSubscribers(runId)
-                .catch(() => {
-                  // ignore terminal cleanup failures while stream is closing.
-                });
+              terminalClose = closeRunSubscribers(runId).catch(() => {
+                // ignore terminal cleanup failures while stream is closing.
+              });
             }
             if (!runId) {
               try {
@@ -806,7 +946,7 @@ export async function startWebServer(port: number): Promise<void> {
 
       return new Response("not found", {
         status: 404,
-        headers: createCorsHeaders("text/plain; charset=utf-8"),
+        headers: createSecurityHeaders("text/plain; charset=utf-8"),
       });
     },
   });

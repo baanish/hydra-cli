@@ -1,25 +1,37 @@
 import { EventEmitter } from "node:events";
 
-import { runModelWithOptionalTools, type ModelRunResult } from "./model";
-import { runWithConcurrency } from "./concurrency";
 import {
-  createRun,
-  createAgentRun,
+  addTokenUsage,
   completeAgentRun,
-  updateAgentRun,
-  updateRunStatus,
+  createAgentRun,
+  createRun,
   markRunComplete,
   markRunFailed,
-  addTokenUsage,
+  updateAgentRun,
+  updateRunStatus,
 } from "../db/queries";
-import { allPersonas, generateEphemeralPersonas, loadCustomPersonas } from "./personas";
+import { formatErrorMessage, sanitizeForTerminal } from "../security";
+import type {
+  AgentRunState,
+  DecomposedAssignment,
+  PersonaConfig,
+  PipelineEvent,
+  RunStatus,
+  SearchConfig,
+} from "../types";
+import { runWithConcurrency } from "./concurrency";
+import { type ModelRunResult, runModelWithOptionalTools } from "./model";
 import {
+  allPersonas,
+  generateEphemeralPersonas,
+  loadCustomPersonas,
+} from "./personas";
+import {
+  DEBATE_PROMPT,
   ORCHESTRATOR_PROMPT,
   RESEARCH_PROMPT,
-  DEBATE_PROMPT,
   SYNTHESIS_PROMPT,
 } from "./prompts";
-import type { SearchConfig, PipelineEvent, DecomposedAssignment, PersonaConfig, AgentRunState, RunStatus } from "../types";
 
 /** configuration passed to pipeline creation and used across all phases. */
 export interface PipelineConfig {
@@ -77,6 +89,21 @@ type PersonaOutput = {
 };
 
 const MAX_DEBATE_CONTEXT_CHARS = 3200;
+const MAX_PERSISTED_ERROR_CHARS = 200;
+
+function createPersistedErrorSummary(error: unknown, fallback: string): string {
+  const sanitized = formatErrorMessage(error).replace(/\s+/g, " ").trim();
+  const summary = sanitized || fallback;
+  return summary.length <= MAX_PERSISTED_ERROR_CHARS
+    ? summary
+    : `${summary.slice(0, MAX_PERSISTED_ERROR_CHARS - 1)}…`;
+}
+
+function logProcessError(context: string, error: unknown): void {
+  const sanitizedContext = sanitizeForTerminal(context);
+  const sanitizedError = formatErrorMessage(error);
+  console.error(`[hydra] ${sanitizedContext} ${sanitizedError}`.trim());
+}
 
 /** orchestrates a full hydra run across decomposition, research, debate, and synthesis. */
 export class HydraPipeline extends EventEmitter {
@@ -88,7 +115,10 @@ export class HydraPipeline extends EventEmitter {
   #totalCompletionTokens = 0;
 
   /** initialize pipeline with validated runtime configuration. */
-  constructor(config: PipelineConfig, dependencies: Partial<PipelineDependencies> = {}) {
+  constructor(
+    config: PipelineConfig,
+    dependencies: Partial<PipelineDependencies> = {},
+  ) {
     super();
     this.#config = config;
     this.#orchestratorModel = config.orchestratorModel ?? config.model;
@@ -147,7 +177,9 @@ export class HydraPipeline extends EventEmitter {
               return result.output;
             },
           );
-          console.error(`[hydra] generated ${gap} ephemeral persona(s) to fill agent count`);
+          console.error(
+            `[hydra] generated ${gap} ephemeral persona(s) to fill agent count`,
+          );
           personas = [...customPersonas, ...generatedPersonas];
         } else {
           personas = customPersonas.slice(0, agentCount);
@@ -167,15 +199,27 @@ export class HydraPipeline extends EventEmitter {
         }
       }
 
-      const decomposedAssignments = await this.decompose(query, run.id, personas, agentCount);
-      const selectedPersonas = decomposedAssignments.map(({ persona }) => persona);
+      const decomposedAssignments = await this.decompose(
+        query,
+        run.id,
+        personas,
+        agentCount,
+      );
+      const selectedPersonas = decomposedAssignments.map(
+        ({ persona }) => persona,
+      );
 
       this.setStatus(run.id, "researching");
-      const researchOutputs = await this.runResearchPhase(run.id, decomposedAssignments);
-      const debateSeedOutputs = researchOutputs.filter(
-        (item) => typeof item.output === "string" && item.output.trim().length > 0,
+      const researchOutputs = await this.runResearchPhase(
+        run.id,
+        decomposedAssignments,
       );
-      const excludedResearchCount = researchOutputs.length - debateSeedOutputs.length;
+      const debateSeedOutputs = researchOutputs.filter(
+        (item) =>
+          typeof item.output === "string" && item.output.trim().length > 0,
+      );
+      const excludedResearchCount =
+        researchOutputs.length - debateSeedOutputs.length;
       if (excludedResearchCount > 0) {
         console.warn(
           `[warn] ${excludedResearchCount} research agents returned empty output, excluding from debate`,
@@ -211,8 +255,12 @@ export class HydraPipeline extends EventEmitter {
 
       return { runId: completedRun.id, brief };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "pipeline failed";
-      const failedRun = this.#deps.markRunFailed(run.id, message);
+      const sanitizedSummary = createPersistedErrorSummary(
+        error,
+        "pipeline failed",
+      );
+      logProcessError(`pipeline run failed for ${run.id}:`, error);
+      const failedRun = this.#deps.markRunFailed(run.id, sanitizedSummary);
       this.emit("run-status-changed", {
         type: "run-status-changed",
         runId: failedRun.id,
@@ -251,7 +299,12 @@ export class HydraPipeline extends EventEmitter {
     });
 
     const parsedAssignments = this.parseAssignments(result.output);
-    const resolvedAssignments = this.normalizeAssignments(parsedAssignments, personas, query, agentCount);
+    const resolvedAssignments = this.normalizeAssignments(
+      parsedAssignments,
+      personas,
+      query,
+      agentCount,
+    );
 
     const usedPersonas = new Set<string>();
     return resolvedAssignments.map((assignment) => ({
@@ -310,12 +363,16 @@ export class HydraPipeline extends EventEmitter {
             onExecutionStart: markStarted,
           });
 
-          const completed = this.#deps.completeAgentRun(item.agentRun.id, result.output, {
-            status: "complete",
-            searchQueries: result.searchQueries,
-            promptTokens: result.promptTokens,
-            completionTokens: result.completionTokens,
-          });
+          const completed = this.#deps.completeAgentRun(
+            item.agentRun.id,
+            result.output,
+            {
+              status: "complete",
+              searchQueries: result.searchQueries,
+              promptTokens: result.promptTokens,
+              completionTokens: result.completionTokens,
+            },
+          );
 
           const state = this.toAgentState(completed);
           const event: PipelineEvent = {
@@ -346,10 +403,21 @@ export class HydraPipeline extends EventEmitter {
             status: "complete",
           };
         } catch (error) {
-          const message = error instanceof Error ? error.message : "research agent failed";
-          const completed = this.#deps.completeAgentRun(item.agentRun.id, message, {
-            status: "error",
-          });
+          const sanitizedSummary = createPersistedErrorSummary(
+            error,
+            "research agent failed",
+          );
+          logProcessError(
+            `research agent failed for ${item.persona.name}:`,
+            error,
+          );
+          const completed = this.#deps.completeAgentRun(
+            item.agentRun.id,
+            sanitizedSummary,
+            {
+              status: "error",
+            },
+          );
 
           const state = this.toAgentState(completed);
           const event: PipelineEvent = {
@@ -390,7 +458,9 @@ export class HydraPipeline extends EventEmitter {
         item.output.trim().length > 0,
     );
     if (successfulOutputs.length === 0) {
-      throw new Error(`research phase failed: ${successfulOutputs.length}/${totalAgents} agents succeeded`);
+      throw new Error(
+        `research phase failed: ${successfulOutputs.length}/${totalAgents} agents succeeded`,
+      );
     }
 
     return results;
@@ -406,7 +476,13 @@ export class HydraPipeline extends EventEmitter {
     const rounds = Math.max(1, this.#config.debateRounds);
 
     for (let round = 1; round <= rounds; round++) {
-      currentOutputs = await this.runDebateRound(runId, query, personas, currentOutputs, round);
+      currentOutputs = await this.runDebateRound(
+        runId,
+        query,
+        personas,
+        currentOutputs,
+        round,
+      );
     }
 
     return currentOutputs;
@@ -427,12 +503,14 @@ export class HydraPipeline extends EventEmitter {
           item.status === "complete" &&
           item.output.trim().length > 0,
       );
-      const fallbackPeers = previousOutputs.filter((item) => item.persona.name !== persona.name);
+      const fallbackPeers = previousOutputs.filter(
+        (item) => item.persona.name !== persona.name,
+      );
       const selectedPeers = [
         ...successfulPeers.slice(0, 2),
-        ...fallbackPeers.filter(
-          (item) => successfulPeers.indexOf(item) === -1,
-        ).slice(0, Math.max(0, 2 - successfulPeers.length)),
+        ...fallbackPeers
+          .filter((item) => successfulPeers.indexOf(item) === -1)
+          .slice(0, Math.max(0, 2 - successfulPeers.length)),
       ].slice(0, 2);
       const agentRun = this.#deps.createAgentRun({
         runId,
@@ -442,7 +520,9 @@ export class HydraPipeline extends EventEmitter {
         systemPrompt: DEBATE_PROMPT(persona, round),
       });
 
-      const priorFinding = previousOutputs.find((item) => item.persona.name === persona.name);
+      const priorFinding = previousOutputs.find(
+        (item) => item.persona.name === persona.name,
+      );
       const assignmentMessage = this.buildDebatePrompt(
         query,
         persona.name,
@@ -486,12 +566,16 @@ export class HydraPipeline extends EventEmitter {
             onExecutionStart: markStarted,
           });
 
-          const completed = this.#deps.completeAgentRun(item.agentRun.id, result.output, {
-            status: "complete",
-            searchQueries: result.searchQueries,
-            promptTokens: result.promptTokens,
-            completionTokens: result.completionTokens,
-          });
+          const completed = this.#deps.completeAgentRun(
+            item.agentRun.id,
+            result.output,
+            {
+              status: "complete",
+              searchQueries: result.searchQueries,
+              promptTokens: result.promptTokens,
+              completionTokens: result.completionTokens,
+            },
+          );
 
           const state = this.toAgentState(completed);
           this.emit("agent-complete", {
@@ -521,10 +605,21 @@ export class HydraPipeline extends EventEmitter {
             status: "complete",
           };
         } catch (error) {
-          const message = error instanceof Error ? error.message : "debate agent failed";
-          const completed = this.#deps.completeAgentRun(item.agentRun.id, message, {
-            status: "error",
-          });
+          const sanitizedSummary = createPersistedErrorSummary(
+            error,
+            "debate agent failed",
+          );
+          logProcessError(
+            `debate agent failed for ${item.persona.name}:`,
+            error,
+          );
+          const completed = this.#deps.completeAgentRun(
+            item.agentRun.id,
+            sanitizedSummary,
+            {
+              status: "error",
+            },
+          );
 
           const state = this.toAgentState(completed);
           this.emit("agent-complete", {
@@ -563,8 +658,11 @@ export class HydraPipeline extends EventEmitter {
         typeof item.output === "string" &&
         item.output.trim().length > 0,
     );
-    if (successfulOutputs.length < 2) {
-      throw new Error(`debate round ${round} failed: ${successfulOutputs.length}/${totalAgents} agents succeeded`);
+    const requiredSuccessfulOutputs = Math.min(2, totalAgents);
+    if (successfulOutputs.length < requiredSuccessfulOutputs) {
+      throw new Error(
+        `debate round ${round} failed: ${successfulOutputs.length}/${totalAgents} agents succeeded`,
+      );
     }
 
     return successfulOutputs;
@@ -577,7 +675,10 @@ export class HydraPipeline extends EventEmitter {
     researchOutputs: PersonaOutput[],
     debateOutputs: PersonaOutput[],
   ): Promise<string> {
-    const formattedResearch = this.formatPersonaOutputs("research", researchOutputs);
+    const formattedResearch = this.formatPersonaOutputs(
+      "research",
+      researchOutputs,
+    );
     const formattedDebate = this.formatPersonaOutputs("debate", debateOutputs);
 
     const userPrompt = [
@@ -619,8 +720,12 @@ export class HydraPipeline extends EventEmitter {
       onExecutionStart: input.onExecutionStart,
     });
 
-    const promptTokens = Number.isFinite(result.promptTokens) ? result.promptTokens : 0;
-    const completionTokens = Number.isFinite(result.completionTokens) ? result.completionTokens : 0;
+    const promptTokens = Number.isFinite(result.promptTokens)
+      ? result.promptTokens
+      : 0;
+    const completionTokens = Number.isFinite(result.completionTokens)
+      ? result.completionTokens
+      : 0;
     this.#totalPromptTokens += promptTokens;
     this.#totalCompletionTokens += completionTokens;
     this.#deps.addTokenUsage(input.runId, promptTokens, completionTokens);
@@ -655,7 +760,11 @@ export class HydraPipeline extends EventEmitter {
     for (const assignment of assignments) {
       const candidateName = assignment.persona.trim();
       const persona = personaByName.get(candidateName.toLowerCase());
-      if (!candidateName || !persona || usedPersonas.has(persona.name.toLowerCase())) {
+      if (
+        !candidateName ||
+        !persona ||
+        usedPersonas.has(persona.name.toLowerCase())
+      ) {
         continue;
       }
       usedPersonas.add(persona.name.toLowerCase());
@@ -677,7 +786,10 @@ export class HydraPipeline extends EventEmitter {
       const shuffledRemaining = [...remainingPersonas];
       for (let i = shuffledRemaining.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [shuffledRemaining[i], shuffledRemaining[j]] = [shuffledRemaining[j], shuffledRemaining[i]];
+        [shuffledRemaining[i], shuffledRemaining[j]] = [
+          shuffledRemaining[j],
+          shuffledRemaining[i],
+        ];
       }
 
       for (let index = deduplicated.length; index < targetCount; index++) {
@@ -712,7 +824,8 @@ export class HydraPipeline extends EventEmitter {
     }
 
     const fromFence = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate = fromFence?.[1]?.trim() ?? this.extractBracketPayload(trimmed);
+    const candidate =
+      fromFence?.[1]?.trim() || this.extractBracketPayload(trimmed);
     if (!candidate) {
       return [];
     }
@@ -751,7 +864,9 @@ export class HydraPipeline extends EventEmitter {
       return [];
     }
 
-    return assignments.filter((assignment): assignment is DecomposedAssignment => assignment !== null);
+    return assignments.filter(
+      (assignment): assignment is DecomposedAssignment => assignment !== null,
+    );
   }
 
   private extractBracketPayload(raw: string): string {
@@ -784,7 +899,9 @@ export class HydraPipeline extends EventEmitter {
       return byName;
     }
 
-    const fallback = personas.find((persona) => !usedPersonas.has(persona.name.toLowerCase()));
+    const fallback = personas.find(
+      (persona) => !usedPersonas.has(persona.name.toLowerCase()),
+    );
     if (!fallback) {
       return personas[0];
     }
@@ -804,14 +921,19 @@ export class HydraPipeline extends EventEmitter {
     peers: PersonaOutput[],
     round: number,
   ): string {
-    const ownFindingForPrompt = this.trimDebateContext(ownFinding || "No finding produced.", round);
-    const peerLines = peers.length === 0
-      ? ["No peer findings available."]
-      : peers.map((peer) =>
-          `${peer.persona.name}:\n${this.formatCodeBlock(
-            this.trimDebateContext(peer.output || "No output.", round),
-          )}`,
-        );
+    const ownFindingForPrompt = this.trimDebateContext(
+      ownFinding || "No finding produced.",
+      round,
+    );
+    const peerLines =
+      peers.length === 0
+        ? ["No peer findings available."]
+        : peers.map(
+            (peer) =>
+              `${peer.persona.name}:\n${this.formatCodeBlock(
+                this.trimDebateContext(peer.output || "No output.", round),
+              )}`,
+          );
 
     return [
       `Original query:\n${this.formatCodeBlock(query)}`,
@@ -829,7 +951,10 @@ export class HydraPipeline extends EventEmitter {
     return `${text.slice(0, MAX_DEBATE_CONTEXT_CHARS)}\n\n[truncated for context window]`;
   }
 
-  private formatPersonaOutputs(label: string, outputs: PersonaOutput[]): string {
+  private formatPersonaOutputs(
+    label: string,
+    outputs: PersonaOutput[],
+  ): string {
     if (outputs.length === 0) {
       return `${label.toUpperCase()} OUTPUTS:\nNo outputs.`;
     }
@@ -842,7 +967,9 @@ export class HydraPipeline extends EventEmitter {
       .join("\n\n")}`;
   }
 
-  private toAgentState(record: ReturnType<typeof completeAgentRun>): AgentRunState {
+  private toAgentState(
+    record: ReturnType<typeof completeAgentRun>,
+  ): AgentRunState {
     return {
       runId: record.runId,
       phase: record.phase,
@@ -852,12 +979,13 @@ export class HydraPipeline extends EventEmitter {
       completedAt: record.completedAt,
       promptTokens: record.promptTokens,
       completionTokens: record.completionTokens,
-      systemPrompt: record.systemPrompt,
       output: record.output,
     };
   }
 
   private resolvePersonas(): PersonaConfig[] {
-    return typeof this.#deps.personas === "function" ? this.#deps.personas() : this.#deps.personas;
+    return typeof this.#deps.personas === "function"
+      ? this.#deps.personas()
+      : this.#deps.personas;
   }
 }

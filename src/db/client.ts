@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync, existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { CONFIG_DIR } from "../config";
 
@@ -49,6 +49,27 @@ function ensureDbDir() {
   }
 }
 
+function enforceDatabaseFilePermissions() {
+  const filePaths = [DB_PATH, `${DB_PATH}-wal`, `${DB_PATH}-shm`];
+  for (const path of filePaths) {
+    if (!existsSync(path)) {
+      continue;
+    }
+    try {
+      chmodSync(path, 0o600);
+    } catch (error) {
+      if (path === DB_PATH) {
+        const message =
+          error instanceof Error ? error.message : "unknown permission error";
+        console.warn(
+          `[hydra] warning: could not set permissions on ${DB_PATH}: ${message}`,
+        );
+      }
+      // Ignore chmod failures for transient sqlite sidecar files.
+    }
+  }
+}
+
 function initializeSchema(database: Database) {
   database.exec("PRAGMA foreign_keys = ON;");
   database.exec("PRAGMA journal_mode = WAL;");
@@ -69,6 +90,7 @@ export function getDatabase(): Database {
   ensureDbDir();
   const database = new Database(DB_PATH);
   initializeSchema(database);
+  enforceDatabaseFilePermissions();
   db = database;
   return db;
 }

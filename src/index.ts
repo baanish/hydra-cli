@@ -1,33 +1,34 @@
 #!/usr/bin/env bun
 
-import { Command } from "commander";
 import { writeFileSync } from "node:fs";
+import { Command } from "commander";
 
+import {
+  MAX_DEBATE_ROUNDS,
+  MIN_DEBATE_ROUNDS,
+  clampInt,
+  getConfigPath,
+  loadConfig,
+  maskConfigValue,
+  sanitizeConfigValueForSet,
+  writeConfig,
+} from "./config";
 import { getRun, getRunAgentRuns, listRuns, removeRun } from "./db/queries";
-import { HydraPipeline, type PipelineConfig } from "./engine/pipeline";
 import {
   PERSONAS,
   addCustomPersona,
   allPersonas,
   removeCustomPersona,
 } from "./engine/personas";
+import { HydraPipeline, type PipelineConfig } from "./engine/pipeline";
+import { formatErrorMessage, sanitizeForTerminal } from "./security";
+import type { HydraConfig, RunRecord } from "./types";
+import type { PipelineEvent, SearchConfig } from "./types";
 import {
   emitAgentProgress,
   setAgentModeConcurrency,
   setAgentModeDebateRounds,
 } from "./ui/agent-mode";
-import {
-  clampInt,
-  MAX_DEBATE_ROUNDS,
-  MIN_DEBATE_ROUNDS,
-  loadConfig,
-  maskConfigValue,
-  sanitizeConfigValueForSet,
-  writeConfig,
-  getConfigPath,
-} from "./config";
-import type { HydraConfig, RunRecord } from "./types";
-import type { PipelineEvent, SearchConfig } from "./types";
 
 const command = new Command()
   .name("hydra")
@@ -149,7 +150,10 @@ const RUN_VALUE_OPTIONS = new Set([
   "--output",
 ]);
 
-function isRecognizedRunOptionToken(token: string): { known: boolean; takesValue: boolean } {
+function isRecognizedRunOptionToken(token: string): {
+  known: boolean;
+  takesValue: boolean;
+} {
   if (RUN_BOOLEAN_OPTIONS.has(token)) {
     return { known: true, takesValue: false };
   }
@@ -313,7 +317,9 @@ function printRunErrorGuidance(message: string): void {
   const normalized = message.toLowerCase();
 
   if (normalized.includes("524")) {
-    console.error("Tip: Synthetic.new timed out. Try again or reduce --agents.");
+    console.error(
+      "Tip: Synthetic.new timed out. Try again or reduce --agents.",
+    );
     return;
   }
 
@@ -329,12 +335,13 @@ function parseJsonLine(value: string) {
   try {
     return JSON.stringify(JSON.parse(value), null, 2);
   } catch {
-    return value;
+    return sanitizeForTerminal(value);
   }
 }
 
 function slugifyPersonaId(value: string): string {
-  return value.trim()
+  return value
+    .trim()
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
@@ -350,26 +357,30 @@ const runCommand = new Command("run")
     `debate rounds for this run (${MIN_DEBATE_ROUNDS}-${MAX_DEBATE_ROUNDS})`,
   )
   .option("--model <model>", "model override for this run")
-  .option("--custom-personas-only", "use only custom personas (and generate ephemeral personas if needed)")
+  .option(
+    "--custom-personas-only",
+    "use only custom personas (and generate ephemeral personas if needed)",
+  )
   .option("-o, --output <file>", "write full synthesis output to file")
   .option("--agent-mode", "emit machine-friendly logs")
   .option("--json", "emit json payload")
-.action(async (query: string, options) => {
+  .action(async (query: string, options) => {
     const baseConfig = loadConfig();
     const resolvedConcurrency = options.concurrency
       ? clampInt(options.concurrency, 1, 5, baseConfig.maxConcurrency)
       : baseConfig.maxConcurrency;
     const resolvedDebateRounds = options.debateRounds
       ? clampInt(
-        options.debateRounds,
-        MIN_DEBATE_ROUNDS,
-        MAX_DEBATE_ROUNDS,
-        baseConfig.debateRounds,
-      )
+          options.debateRounds,
+          MIN_DEBATE_ROUNDS,
+          MAX_DEBATE_ROUNDS,
+          baseConfig.debateRounds,
+        )
       : baseConfig.debateRounds;
-    const resolvedModel = typeof options.model === "string" && options.model.trim().length > 0
-      ? options.model.trim()
-      : baseConfig.model;
+    const resolvedModel =
+      typeof options.model === "string" && options.model.trim().length > 0
+        ? options.model.trim()
+        : baseConfig.model;
     const resolvedCustomPersonasOnly = options.customPersonasOnly
       ? true
       : baseConfig.customPersonasOnly;
@@ -386,7 +397,9 @@ const runCommand = new Command("run")
     const searchApiKey = resolveSearchApiKey(config);
 
     if (!modelApiKey) {
-      console.error("[hydra] warning: no api-key configured. run calls may fail.");
+      console.error(
+        "[hydra] warning: no api-key configured. run calls may fail.",
+      );
     }
 
     if (!searchApiKey) {
@@ -423,7 +436,10 @@ const runCommand = new Command("run")
 
     const pipeline = new HydraPipeline(pipelineConfig);
     const shouldUseTui =
-    !options.json && !options.agentMode && process.stdout.isTTY === true && process.stderr.isTTY === true;
+      !options.json &&
+      !options.agentMode &&
+      process.stdout.isTTY === true &&
+      process.stderr.isTTY === true;
     let useAgentProgress = options.agentMode || !shouldUseTui;
     type HydraUILike = {
       start: (query: string, agentCount: number) => Promise<void>;
@@ -432,29 +448,30 @@ const runCommand = new Command("run")
     };
     let ui: HydraUILike | null = null;
 
-  if (shouldUseTui) {
-    try {
-      const tuiModule = await import("./ui/tui");
-      ui = new tuiModule.HydraUI({
-        concurrency: config.maxConcurrency,
-        totalDebateRounds: config.debateRounds,
-      });
-      await ui.start(query, agentCount);
-      useAgentProgress = false;
-    } catch (error) {
-      ui?.stop();
-      const message = error instanceof Error ? error.message : "unknown tui initialization error";
-      console.error(
-        `[hydra] warning: failed to initialize TUI, falling back to non-interactive progress: ${message}`,
-      );
-      ui = null;
-      useAgentProgress = true;
+    if (shouldUseTui) {
+      try {
+        const tuiModule = await import("./ui/tui");
+        ui = new tuiModule.HydraUI({
+          concurrency: config.maxConcurrency,
+          totalDebateRounds: config.debateRounds,
+        });
+        await ui.start(query, agentCount);
+        useAgentProgress = false;
+      } catch (error) {
+        ui?.stop();
+        const message =
+          formatErrorMessage(error) || "unknown tui initialization error";
+        console.error(
+          `[hydra] warning: failed to initialize TUI, falling back to non-interactive progress: ${message}`,
+        );
+        ui = null;
+        useAgentProgress = true;
+      }
     }
-  }
 
-  if (!options.json) {
-    setAgentModeDebateRounds(config.debateRounds);
-    setAgentModeConcurrency(config.maxConcurrency);
+    if (!options.json) {
+      setAgentModeDebateRounds(config.debateRounds);
+      setAgentModeConcurrency(config.maxConcurrency);
 
       if (useAgentProgress) {
         pipeline.on("run-created", emitAgentProgress);
@@ -499,7 +516,7 @@ const runCommand = new Command("run")
       result = await pipeline.run(query);
     } catch (error) {
       ui?.stop();
-      const message = error instanceof Error ? error.message : "pipeline failed";
+      const message = formatErrorMessage(error) || "pipeline failed";
       console.error(`[hydra] error: ${message}`);
       printRunErrorGuidance(message);
       process.exitCode = 1;
@@ -510,14 +527,15 @@ const runCommand = new Command("run")
       return;
     }
 
-    const outputPath = typeof options.output === "string" && options.output.trim().length > 0
-      ? options.output.trim()
-      : null;
+    const outputPath =
+      typeof options.output === "string" && options.output.trim().length > 0
+        ? options.output.trim()
+        : null;
     if (outputPath) {
       try {
         writeFileSync(outputPath, result.brief, "utf8");
       } catch (error) {
-        const message = error instanceof Error ? error.message : "unknown error";
+        const message = formatErrorMessage(error) || "unknown error";
         ui?.stop();
         console.error("Error: could not write to file:", message);
         process.exitCode = 1;
@@ -535,11 +553,11 @@ const runCommand = new Command("run")
             query,
             agentCount: finishedRun?.agentCount ?? agentCount,
             elapsedMs: finishedRun?.elapsedMs ?? 0,
-            synthesis: result.brief,
+            synthesis: sanitizeForTerminal(result.brief),
             agents: agentRuns.map((agentRun) => ({
               persona: agentRun.persona,
               phase: agentRun.phase,
-              output: agentRun.output,
+              output: sanitizeForTerminal(agentRun.output),
             })),
           },
           null,
@@ -556,7 +574,7 @@ const runCommand = new Command("run")
       ui.stop(result.brief);
     } else {
       console.log("\nbrief:");
-      console.log(result.brief);
+      console.log(sanitizeForTerminal(result.brief));
     }
     if (outputPath) {
       console.log(`Saved to ${outputPath}`);
@@ -588,15 +606,30 @@ const historyCommand = new Command("history")
         createdAt: new Date(run.createdAt).toISOString(),
         agents: String(run.agentCount),
         elapsed: formatElapsed(elapsedMs),
-        query: truncateQuery(run.query, 60),
+        query: sanitizeForTerminal(truncateQuery(run.query, 60)),
       };
     });
 
-    const statusWidth = Math.max("status".length, ...rows.map((row) => row.status.length));
-    const runIdWidth = Math.max("run-id".length, ...rows.map((row) => row.runId.length));
-    const createdAtWidth = Math.max("created-at".length, ...rows.map((row) => row.createdAt.length));
-    const agentsWidth = Math.max("agents".length, ...rows.map((row) => row.agents.length));
-    const elapsedWidth = Math.max("elapsed".length, ...rows.map((row) => row.elapsed.length));
+    const statusWidth = Math.max(
+      "status".length,
+      ...rows.map((row) => row.status.length),
+    );
+    const runIdWidth = Math.max(
+      "run-id".length,
+      ...rows.map((row) => row.runId.length),
+    );
+    const createdAtWidth = Math.max(
+      "created-at".length,
+      ...rows.map((row) => row.createdAt.length),
+    );
+    const agentsWidth = Math.max(
+      "agents".length,
+      ...rows.map((row) => row.agents.length),
+    );
+    const elapsedWidth = Math.max(
+      "elapsed".length,
+      ...rows.map((row) => row.elapsed.length),
+    );
 
     console.log(
       [
@@ -635,22 +668,24 @@ const viewCommand = new Command("view")
 
     console.log(`id: ${run.id}`);
     console.log(`status: ${run.status}`);
-    console.log(`query: ${run.query}`);
+    console.log(`query: ${sanitizeForTerminal(run.query)}`);
     console.log(`createdAt: ${new Date(run.createdAt).toISOString()}`);
 
     if (run.error) {
-      console.log(`error: ${run.error}`);
+      console.log(`error: ${sanitizeForTerminal(run.error)}`);
     }
     if (run.brief) {
       console.log("\nbrief:");
-      console.log(run.brief);
+      console.log(sanitizeForTerminal(run.brief));
     }
 
     if (options.transcripts) {
       const transcripts = getRunAgentRuns(run.id);
       console.log(`\nagent_runs: ${transcripts.length}`);
       for (const transcript of transcripts) {
-        console.log(`\n-- ${transcript.persona} [${transcript.phase}]`);
+        console.log(
+          `\n-- ${sanitizeForTerminal(transcript.persona)} [${transcript.phase}]`,
+        );
         console.log(`status: ${transcript.status}`);
         console.log(`started: ${new Date(transcript.startedAt).toISOString()}`);
         if (transcript.output) {
@@ -684,7 +719,9 @@ const personaListCommand = new Command("list")
 
     for (const persona of personas) {
       const type = builtinPersonaIds.has(persona.id) ? "builtin" : "custom";
-      console.log(`[${type}] ${persona.id}  ${persona.name} — ${persona.description}`);
+      console.log(
+        `[${type}] ${sanitizeForTerminal(persona.id)}  ${sanitizeForTerminal(persona.name)} — ${sanitizeForTerminal(persona.description)}`,
+      );
     }
   });
 
@@ -734,6 +771,7 @@ const webCommand = new Command("web")
   .option("--port <n>", "port to listen on", "3737")
   .action(async (options) => {
     const port = clampInt(options.port, 1024, 65535, 3737);
+    loadConfig();
     const { startWebServer } = await import("./web/index");
     await startWebServer(port);
   });
@@ -763,7 +801,9 @@ const configSetCommand = new Command("set")
       throw new Error(parsed.error ?? "invalid value");
     }
 
-    const config = writeConfig({ [mapped]: parsed.value } as Partial<HydraConfig>);
+    const config = writeConfig({
+      [mapped]: parsed.value,
+    } as Partial<HydraConfig>);
     const safeConfig = createMaskedConfig(config);
     console.log(`updated ${key}`);
     console.log(JSON.stringify(safeConfig, null, 2));
@@ -786,7 +826,7 @@ if (import.meta.main) {
   (async () => {
     await command.parseAsync(normalizeArgvForBareRun(process.argv));
   })().catch((e) => {
-    console.error(e);
+    console.error(formatErrorMessage(e));
     process.exitCode = 1;
   });
 }

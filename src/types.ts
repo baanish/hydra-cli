@@ -124,7 +124,6 @@ export interface AgentRunState {
   completedAt: number | null;
   promptTokens: number;
   completionTokens: number;
-  systemPrompt: string;
   output: string;
 }
 

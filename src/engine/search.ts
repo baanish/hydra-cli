@@ -1,3 +1,4 @@
+import { formatUpstreamHttpError } from "../security";
 import type { SearchConfig, SearchResult } from "../types";
 
 /** arguments expected by `web_search` tool calls. */
@@ -10,7 +11,8 @@ export const WEB_SEARCH_TOOL = {
   type: "function" as const,
   function: {
     name: "web_search",
-    description: "Search the web for current information. Returns ~5 results with full text.",
+    description:
+      "Search the web for current information. Returns ~5 results with full text.",
     parameters: {
       type: "object",
       properties: {
@@ -65,7 +67,10 @@ function normalizeResult(raw: SearchResultCandidate): SearchResult {
   };
 }
 
-function withSearchTimeout(url: string, requestInit: RequestInit): Promise<Response> {
+function withSearchTimeout(
+  url: string,
+  requestInit: RequestInit,
+): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
   return fetch(url, {
@@ -77,10 +82,15 @@ function withSearchTimeout(url: string, requestInit: RequestInit): Promise<Respo
 }
 
 function warnUntestedSearch(provider: "exa" | "brave"): void {
-  console.warn(`[hydra] Warning: ${provider} search is community-contributed and untested. PRs welcome!`);
+  console.warn(
+    `[hydra] Warning: ${provider} search is community-contributed and untested. PRs welcome!`,
+  );
 }
 
-async function runSyntheticSearch(query: string, apiKey: string): Promise<SearchResult[]> {
+async function runSyntheticSearch(
+  query: string,
+  apiKey: string,
+): Promise<SearchResult[]> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
     return [];
@@ -110,7 +120,9 @@ async function runSyntheticSearch(query: string, apiKey: string): Promise<Search
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Synthetic search failed (${response.status}): ${body}`);
+    throw new Error(
+      formatUpstreamHttpError("Synthetic", response.status, body),
+    );
   }
 
   const payload = (await response.json()) as {
@@ -122,7 +134,10 @@ async function runSyntheticSearch(query: string, apiKey: string): Promise<Search
   return rawResults.map(normalizeResult);
 }
 
-async function runExaSearch(query: string, apiKey: string): Promise<SearchResult[]> {
+async function runExaSearch(
+  query: string,
+  apiKey: string,
+): Promise<SearchResult[]> {
   warnUntestedSearch("exa");
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
@@ -143,7 +158,7 @@ async function runExaSearch(query: string, apiKey: string): Promise<SearchResult
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Exa search failed (${response.status}): ${body}`);
+    throw new Error(formatUpstreamHttpError("Exa", response.status, body));
   }
 
   const payload = (await response.json()) as {
@@ -153,7 +168,10 @@ async function runExaSearch(query: string, apiKey: string): Promise<SearchResult
   return (payload.results ?? []).map(normalizeResult);
 }
 
-async function runBraveSearch(query: string, apiKey: string): Promise<SearchResult[]> {
+async function runBraveSearch(
+  query: string,
+  apiKey: string,
+): Promise<SearchResult[]> {
   warnUntestedSearch("brave");
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
@@ -174,7 +192,7 @@ async function runBraveSearch(query: string, apiKey: string): Promise<SearchResu
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Brave search failed (${response.status}): ${body}`);
+    throw new Error(formatUpstreamHttpError("Brave", response.status, body));
   }
 
   const payload = (await response.json()) as {
@@ -189,7 +207,10 @@ async function runBraveSearch(query: string, apiKey: string): Promise<SearchResu
 }
 
 /** run search through configured provider and return normalized results. */
-export async function runWebSearch(query: string, config: SearchConfig): Promise<SearchResult[]> {
+export async function runWebSearch(
+  query: string,
+  config: SearchConfig,
+): Promise<SearchResult[]> {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) {
     return [];

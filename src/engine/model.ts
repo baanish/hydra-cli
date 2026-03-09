@@ -1,4 +1,8 @@
-import OpenAI, { APIConnectionError, APIConnectionTimeoutError, APIError } from "openai";
+import OpenAI, {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+} from "openai";
 import type {
   ChatCompletion,
   ChatCompletionCreateParamsNonStreaming,
@@ -6,12 +10,9 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 
-import {
-  runSearchTool,
-  SEARCH_TOOLS,
-  type SearchToolCall,
-} from "./search";
+import { wrapUntrustedToolResult } from "../security";
 import type { SearchConfig } from "../types";
+import { SEARCH_TOOLS, type SearchToolCall, runSearchTool } from "./search";
 
 type NormalizedRole = "system" | "user" | "assistant" | "tool";
 type NormalizedToolCall = {
@@ -98,7 +99,9 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-function createModelCallTimeoutError(timeoutMs: number): Error & { code: string } {
+function createModelCallTimeoutError(
+  timeoutMs: number,
+): Error & { code: string } {
   const timeoutSeconds = Math.floor(timeoutMs / 1000);
   const error = new Error(
     `ETIMEDOUT from backend (model call exceeded ${timeoutSeconds}s timeout)`,
@@ -122,14 +125,10 @@ async function createCompletionWithTimeout(
   });
 
   try {
-    const completionPromise = client.chat.completions.create(
-      params,
-      { signal: controller.signal },
-    ) as Promise<ChatCompletion>;
-    return await Promise.race([
-      completionPromise,
-      timeoutPromise,
-    ]);
+    const completionPromise = client.chat.completions.create(params, {
+      signal: controller.signal,
+    }) as Promise<ChatCompletion>;
+    return await Promise.race([completionPromise, timeoutPromise]);
   } finally {
     if (timeoutHandle) {
       clearTimeout(timeoutHandle);
@@ -178,16 +177,24 @@ function computeRetryBackoffMs(attempt: number, baseBackoffMs: number): number {
     baseBackoffMs * RETRY_BACKOFF_MULTIPLIER ** exponent,
     RETRY_BACKOFF_CAP_MS,
   );
-  const jitterMs = attempt <= 1 ? 0 : Math.floor(Math.random() * (RETRY_JITTER_MAX_MS + 1));
+  const jitterMs =
+    attempt <= 1 ? 0 : Math.floor(Math.random() * (RETRY_JITTER_MAX_MS + 1));
   return exponentialDelayMs + jitterMs;
 }
 
 function classifyRetryableModelError(error: unknown): RetryDecision {
-  if (error instanceof APIError && typeof error.status === "number" && RETRYABLE_STATUS_CODES.has(error.status)) {
+  if (
+    error instanceof APIError &&
+    typeof error.status === "number" &&
+    RETRYABLE_STATUS_CODES.has(error.status)
+  ) {
     return {
       shouldRetry: true,
       reason: `${error.status} from backend`,
-      baseBackoffMs: error.status === 429 ? RETRY_RATE_LIMIT_BASE_BACKOFF_MS : RETRY_BASE_BACKOFF_MS,
+      baseBackoffMs:
+        error.status === 429
+          ? RETRY_RATE_LIMIT_BASE_BACKOFF_MS
+          : RETRY_BASE_BACKOFF_MS,
     };
   }
 
@@ -254,9 +261,10 @@ function classifyRetryableModelError(error: unknown): RetryDecision {
 
   return {
     shouldRetry: false,
-    reason: error instanceof Error && error.message.trim()
-      ? error.message.trim()
-      : "non-retryable error",
+    reason:
+      error instanceof Error && error.message.trim()
+        ? error.message.trim()
+        : "non-retryable error",
     baseBackoffMs: RETRY_BASE_BACKOFF_MS,
   };
 }
@@ -270,14 +278,18 @@ async function createCompletionWithRetry(
       return await createCompletionWithTimeout(client, params);
     } catch (error) {
       const retryDecision = classifyRetryableModelError(error);
-      const shouldRetry = retryDecision.shouldRetry && attempt < MAX_BACKEND_ATTEMPTS;
+      const shouldRetry =
+        retryDecision.shouldRetry && attempt < MAX_BACKEND_ATTEMPTS;
       if (!shouldRetry) {
         throw new Error(
           `API failed after ${attempt} attempt${attempt === 1 ? "" : "s"}: ${retryDecision.reason}`,
         );
       }
 
-      const backoffMs = computeRetryBackoffMs(attempt, retryDecision.baseBackoffMs);
+      const backoffMs = computeRetryBackoffMs(
+        attempt,
+        retryDecision.baseBackoffMs,
+      );
       console.error(
         `[retry ${attempt}/${MAX_BACKEND_ATTEMPTS}] ${retryDecision.reason}, waiting ${(
           backoffMs / 1000
@@ -291,7 +303,9 @@ async function createCompletionWithRetry(
 }
 
 function isAllowedRole(value: unknown): value is NormalizedRole {
-  return typeof value === "string" && ALLOWED_ROLES.includes(value as NormalizedRole);
+  return (
+    typeof value === "string" && ALLOWED_ROLES.includes(value as NormalizedRole)
+  );
 }
 
 function normalizeAssistantMessage(
@@ -302,7 +316,9 @@ function normalizeAssistantMessage(
   toolCalls: NormalizedToolCall[];
 } {
   if (!rawMessage || typeof rawMessage !== "object") {
-    throw new Error(`Invalid OpenAI message at index ${messageIndex}: assistant message must be object.`);
+    throw new Error(
+      `Invalid OpenAI message at index ${messageIndex}: assistant message must be object.`,
+    );
   }
 
   const message = rawMessage as {
@@ -378,9 +394,14 @@ function normalizeAssistantMessage(
   return { content, toolCalls };
 }
 
-function normalizeToolMessage(rawMessage: unknown, messageIndex: number): NormalizedMessage {
+function normalizeToolMessage(
+  rawMessage: unknown,
+  messageIndex: number,
+): NormalizedMessage {
   if (!rawMessage || typeof rawMessage !== "object") {
-    throw new Error(`Invalid message at index ${messageIndex}: message must be object.`);
+    throw new Error(
+      `Invalid message at index ${messageIndex}: message must be object.`,
+    );
   }
 
   const message = rawMessage as {
@@ -394,12 +415,19 @@ function normalizeToolMessage(rawMessage: unknown, messageIndex: number): Normal
     throw new Error(`Invalid role at message index ${messageIndex}.`);
   }
   if (typeof message.content !== "string") {
-    throw new Error(`Invalid content at message index ${messageIndex}: must be string.`);
+    throw new Error(
+      `Invalid content at message index ${messageIndex}: must be string.`,
+    );
   }
 
   if (message.role === "tool") {
-    if (typeof message.tool_call_id !== "string" || !message.tool_call_id.trim()) {
-      throw new Error(`Invalid tool message at index ${messageIndex}: missing tool_call_id.`);
+    if (
+      typeof message.tool_call_id !== "string" ||
+      !message.tool_call_id.trim()
+    ) {
+      throw new Error(
+        `Invalid tool message at index ${messageIndex}: missing tool_call_id.`,
+      );
     }
     return {
       role: "tool",
@@ -414,7 +442,7 @@ function normalizeToolMessage(rawMessage: unknown, messageIndex: number): Normal
       content: message.content,
     };
     if (Array.isArray(message.tool_calls)) {
-      normalized["tool_calls"] = message.tool_calls as NormalizedToolCall[];
+      normalized.tool_calls = message.tool_calls as NormalizedToolCall[];
     }
     return normalized;
   }
@@ -425,16 +453,24 @@ function normalizeToolMessage(rawMessage: unknown, messageIndex: number): Normal
   };
 }
 
-function buildToolArguments(rawArgs: string, messageIndex: number, toolIndex: number): SearchToolCall {
+function buildToolArguments(
+  rawArgs: string,
+  messageIndex: number,
+  toolIndex: number,
+): SearchToolCall {
   let parsed: { query?: unknown };
   try {
     parsed = JSON.parse(rawArgs) as { query?: unknown };
   } catch {
-    throw new Error(`Tool arguments at message ${messageIndex}, tool ${toolIndex} are invalid JSON.`);
+    throw new Error(
+      `Tool arguments at message ${messageIndex}, tool ${toolIndex} are invalid JSON.`,
+    );
   }
 
   if (typeof parsed.query !== "string" || !parsed.query.trim()) {
-    throw new Error(`Tool call at message ${messageIndex}, tool ${toolIndex} missing query argument.`);
+    throw new Error(
+      `Tool call at message ${messageIndex}, tool ${toolIndex} missing query argument.`,
+    );
   }
 
   return { query: parsed.query };
@@ -449,32 +485,46 @@ function validateMessages(messages: NormalizedMessage[]) {
       throw new Error(`Invalid message content at index ${index}.`);
     }
     if (message.role === "tool") {
-      if (typeof message.tool_call_id !== "string" || !message.tool_call_id.trim()) {
-        throw new Error(`Invalid tool message at index ${index}: missing tool_call_id.`);
+      if (
+        typeof message.tool_call_id !== "string" ||
+        !message.tool_call_id.trim()
+      ) {
+        throw new Error(
+          `Invalid tool message at index ${index}: missing tool_call_id.`,
+        );
       }
     }
   });
 }
 
 function toolResultMessage(toolCallId: string, result: unknown) {
+  const serializedResult = cleanSearchResultOutput(
+    JSON.stringify(result),
+    MAX_TOOL_RESULT_CHARS,
+  );
   return {
     role: "tool",
     tool_call_id: toolCallId,
-    content: cleanSearchResultOutput(JSON.stringify(result), MAX_TOOL_RESULT_CHARS),
+    content: wrapUntrustedToolResult(serializedResult),
   } as NormalizedMessage;
 }
 
 /** strip tool-call wrapper tags from model output before presentation. */
 export function cleanModelOutput(text: string): string {
   return text
-    .replace(/<\|tool_calls_section_begin\|>[\s\S]*?<\|tool_calls_section_end\|>/g, "")
+    .replace(
+      /<\|tool_calls_section_begin\|>[\s\S]*?<\|tool_calls_section_end\|>/g,
+      "",
+    )
     .replace(/<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>/g, "")
     .replace(/<\|tool_calls_section_begin\|>[\s\S]*/g, "")
     .trim();
 }
 
 /** run a model turn with optional search/tool calling and return normalized artifacts. */
-export async function runModelWithOptionalTools(input: ModelRunInput): Promise<ModelRunResult> {
+export async function runModelWithOptionalTools(
+  input: ModelRunInput,
+): Promise<ModelRunResult> {
   const client = new OpenAI({
     apiKey: input.apiKey,
     baseURL: input.baseUrl,
@@ -535,7 +585,9 @@ export async function runModelWithOptionalTools(input: ModelRunInput): Promise<M
         {
           role: "assistant",
           content: normalized.content,
-          ...(normalized.toolCalls.length > 0 ? { tool_calls: normalized.toolCalls } : {}),
+          ...(normalized.toolCalls.length > 0
+            ? { tool_calls: normalized.toolCalls }
+            : {}),
         },
         messages.length,
       ),
@@ -560,7 +612,8 @@ export async function runModelWithOptionalTools(input: ModelRunInput): Promise<M
         messages.push(
           normalizeToolMessage(
             toolResultMessage(toolCall.id, {
-              error: "Tool call budget exceeded. No remaining tool calls allowed for this run.",
+              error:
+                "Tool call budget exceeded. No remaining tool calls allowed for this run.",
             }),
             messages.length,
           ),
@@ -569,10 +622,18 @@ export async function runModelWithOptionalTools(input: ModelRunInput): Promise<M
       }
 
       try {
-        const args = buildToolArguments(toolCall.function.arguments, messages.length - 1, toolIndex);
+        const args = buildToolArguments(
+          toolCall.function.arguments,
+          messages.length - 1,
+          toolIndex,
+        );
         searchQueries.push(`web_search: ${args.query}`);
         toolCallsUsed += 1;
-        const result = await runSearchTool(toolCall.function.name, args, input.searchConfig);
+        const result = await runSearchTool(
+          toolCall.function.name,
+          args,
+          input.searchConfig,
+        );
         messages.push(
           normalizeToolMessage(
             toolResultMessage(toolCall.id, result),
@@ -650,11 +711,18 @@ export async function runModelWithOptionalTools(input: ModelRunInput): Promise<M
 }
 
 /** run a model turn with tool support explicitly enabled. */
-export async function runModelWithTools(input: ModelRunInput): Promise<ModelRunResult> {
+export async function runModelWithTools(
+  input: ModelRunInput,
+): Promise<ModelRunResult> {
   return runModelWithOptionalTools({ ...input, allowTools: true });
 }
 
 /** clip tool-call result text to avoid runaway token usage in context. */
-export function cleanSearchResultOutput(resultText: string, maxChars = MAX_TOOL_RESULT_CHARS): string {
-  return resultText.length <= maxChars ? resultText : `${resultText.slice(0, maxChars)}\n\n[... truncated]`;
+export function cleanSearchResultOutput(
+  resultText: string,
+  maxChars = MAX_TOOL_RESULT_CHARS,
+): string {
+  return resultText.length <= maxChars
+    ? resultText
+    : `${resultText.slice(0, maxChars)}\n\n[... truncated]`;
 }

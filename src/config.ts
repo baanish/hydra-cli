@@ -1,9 +1,15 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
+import { resolve } from "node:path";
 
-import { SearchProvider } from "./types";
-import type { HydraConfig, HydraConfigFile } from "./types";
+import { validateBaseUrl } from "./security";
+import type { HydraConfig, HydraConfigFile, SearchProvider } from "./types";
 
 /** default api base url for llm requests. */
 export const DEFAULT_BASE_URL = "https://api.synthetic.new/openai/v1";
@@ -34,7 +40,12 @@ const DEFAULTS: HydraConfig = {
 };
 
 /** convert raw numeric values into clamped integers with safe fallback. */
-export function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+export function clampInt(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -63,7 +74,11 @@ function normalizeBoolean(value: unknown): boolean | undefined {
 function normalizeSearchProvider(value: unknown): SearchProvider {
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
-    if (normalized === "synthetic" || normalized === "exa" || normalized === "brave") {
+    if (
+      normalized === "synthetic" ||
+      normalized === "exa" ||
+      normalized === "brave"
+    ) {
       return normalized;
     }
   }
@@ -83,6 +98,26 @@ function trimOptionalString(value: unknown): string | undefined {
 /** trim optional api key strings and convert blank values to undefined. */
 function trimOptionalApiKey(value: unknown): string | undefined {
   return trimOptionalString(value);
+}
+
+/** normalize base-url values and surface invalid explicit settings immediately. */
+function normalizeBaseUrl(value: unknown): string {
+  if (typeof value !== "string") {
+    return DEFAULTS.baseUrl;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return DEFAULTS.baseUrl;
+  }
+
+  const parsed = validateBaseUrl(trimmed);
+  if (!parsed.value) {
+    throw new Error(
+      `invalid base-url "${trimmed}": ${parsed.error ?? "must be a valid absolute URL"}`,
+    );
+  }
+  return parsed.value;
 }
 
 /** ensure the config directory exists before read/write operations. */
@@ -126,7 +161,9 @@ function applyEnvironmentOverrides(config: HydraConfigFile): HydraConfigFile {
     merged.syntheticApiKey = process.env.SYNTHETIC_API_KEY;
   }
   if (process.env.HYDRA_SEARCH_PROVIDER) {
-    merged.searchProvider = normalizeSearchProvider(process.env.HYDRA_SEARCH_PROVIDER);
+    merged.searchProvider = normalizeSearchProvider(
+      process.env.HYDRA_SEARCH_PROVIDER,
+    );
   }
   if (process.env.HYDRA_EXA_API_KEY) {
     merged.exaApiKey = process.env.HYDRA_EXA_API_KEY;
@@ -177,24 +214,36 @@ function normalizeConfig(config: HydraConfig): HydraConfig {
     searchProvider: normalizeSearchProvider(config.searchProvider),
     exaApiKey: trimOptionalApiKey(config.exaApiKey),
     braveApiKey: trimOptionalApiKey(config.braveApiKey),
-    baseUrl: config.baseUrl || DEFAULTS.baseUrl,
+    baseUrl: normalizeBaseUrl(config.baseUrl),
     model: config.model || DEFAULTS.model,
     orchestratorModel: trimOptionalString(config.orchestratorModel),
     researchModel: trimOptionalString(config.researchModel),
-    defaultAgentCount: clampInt(config.defaultAgentCount, 1, 20, DEFAULTS.defaultAgentCount),
-    maxConcurrency: clampInt(config.maxConcurrency, 1, 1, DEFAULTS.maxConcurrency),
+    defaultAgentCount: clampInt(
+      config.defaultAgentCount,
+      1,
+      20,
+      DEFAULTS.defaultAgentCount,
+    ),
+    maxConcurrency: clampInt(
+      config.maxConcurrency,
+      1,
+      1,
+      DEFAULTS.maxConcurrency,
+    ),
     debateRounds: clampInt(
       config.debateRounds,
       MIN_DEBATE_ROUNDS,
       MAX_DEBATE_ROUNDS,
       DEFAULTS.debateRounds,
     ),
-    searchEnabled: typeof config.searchEnabled === "boolean"
-      ? config.searchEnabled
-      : DEFAULTS.searchEnabled,
-    customPersonasOnly: typeof config.customPersonasOnly === "boolean"
-      ? config.customPersonasOnly
-      : DEFAULTS.customPersonasOnly,
+    searchEnabled:
+      typeof config.searchEnabled === "boolean"
+        ? config.searchEnabled
+        : DEFAULTS.searchEnabled,
+    customPersonasOnly:
+      typeof config.customPersonasOnly === "boolean"
+        ? config.customPersonasOnly
+        : DEFAULTS.customPersonasOnly,
   };
 }
 
@@ -259,7 +308,10 @@ export function sanitizeConfigValueForSet(
   if (key === "defaultAgentCount") {
     const parsed = Number.parseInt(value, 10);
     if (!Number.isFinite(parsed)) {
-      return { error: "defaultAgentCount must be an integer", value: undefined };
+      return {
+        error: "defaultAgentCount must be an integer",
+        value: undefined,
+      };
     }
     return { value: clampInt(parsed, 1, 20, DEFAULTS.defaultAgentCount) };
   }
@@ -311,18 +363,34 @@ export function sanitizeConfigValueForSet(
     const parsed = normalizeBoolean(value);
     if (parsed === undefined) {
       return {
-        error: "custom-personas-only must be one of: true, false, 1, 0, yes, no",
+        error:
+          "custom-personas-only must be one of: true, false, 1, 0, yes, no",
         value: undefined,
       };
     }
     return { value: parsed };
   }
 
-  if (key === "baseUrl" || key === "model") {
+  if (key === "baseUrl") {
+    const parsed = validateBaseUrl(value);
+    if (!parsed.value) {
+      return {
+        error: parsed.error ?? "base-url must be a valid absolute URL",
+        value: undefined,
+      };
+    }
+    return { value: parsed.value };
+  }
+
+  if (key === "model") {
     return { value: value.trim() };
   }
 
-  if (key === "syntheticApiKey" || key === "orchestratorModel" || key === "researchModel") {
+  if (
+    key === "syntheticApiKey" ||
+    key === "orchestratorModel" ||
+    key === "researchModel"
+  ) {
     return { value: trimOptionalString(value) };
   }
 

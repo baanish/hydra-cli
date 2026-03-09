@@ -12,6 +12,7 @@ import {
 } from "@opentui/core";
 import { getRunAgentRuns } from "../db/queries";
 import { ETAEstimator, formatDuration } from "../engine/eta";
+import { sanitizeForTerminal } from "../security";
 import type { AgentPhase, PipelineEvent, RunStatus } from "../types";
 import {
 	DB_SYNC_INTERVAL_MS,
@@ -52,22 +53,23 @@ function makePlaceholder(agentIndex: number): AgentEntry {
 }
 
 function formatAgentLine(entry: AgentEntry, nowMs: number): string {
+	const safePersona = sanitizeForTerminal(entry.persona);
 	if (entry.status === "running") {
 		const runningElapsedMs =
 			entry.startedAt > 0 && Number.isFinite(entry.startedAt)
 				? Math.max(0, nowMs - entry.startedAt)
 				: Math.max(0, entry.durationMs ?? 0);
 		const spinner = spinnerFrameAt(RUNNING_SPINNER, runningElapsedMs);
-		return `${spinner} ${entry.persona} — searching... (${formatDuration(runningElapsedMs)})`;
+		return `${spinner} ${safePersona} — searching... (${formatDuration(runningElapsedMs)})`;
 	}
 	if (entry.status === "queued") {
 		const spinner = spinnerFrameAt(QUEUED_SPINNER, nowMs);
-		return `${spinner} ${entry.persona} — queued`;
+		return `${spinner} ${safePersona} — queued`;
 	}
 	if (entry.status === "error") {
-		return `❌ ${entry.persona} — error (${formatDuration(entry.durationMs ?? 0)}, ${formatSearchLabel(entry.searchCount)})`;
+		return `❌ ${safePersona} — error (${formatDuration(entry.durationMs ?? 0)}, ${formatSearchLabel(entry.searchCount)})`;
 	}
-	return `✅ ${entry.persona} — done (${formatDuration(entry.durationMs ?? 0)}, ${formatSearchLabel(entry.searchCount)})`;
+	return `✅ ${safePersona} — done (${formatDuration(entry.durationMs ?? 0)}, ${formatSearchLabel(entry.searchCount)})`;
 }
 
 function parseSearchCount(rawSearchQueries: string): number {
@@ -124,9 +126,10 @@ function mapStatusForDisplay(
 }
 
 function renderMarkdownAsAnsi(markdown: string): string {
+	const safeMarkdown = sanitizeForTerminal(markdown);
 	const reset = "\x1b[0m";
 	const bold = "\x1b[1m";
-	const heading = markdown.replace(
+	const heading = safeMarkdown.replace(
 		/^##\s*(.*)$/gm,
 		(_match, title) => `${bold}## ${title}${reset}`,
 	);
@@ -134,7 +137,7 @@ function renderMarkdownAsAnsi(markdown: string): string {
 }
 
 function truncateQuery(query: string, width: number): string {
-	const cleaned = query.replace(/\s+/g, " ").trim();
+	const cleaned = sanitizeForTerminal(query).replace(/\s+/g, " ").trim();
 	const maxLength = Math.max(30, width - 14);
 	if (cleaned.length <= maxLength) {
 		return cleaned;
@@ -236,7 +239,7 @@ export class HydraUI {
 			content: t`${green(bold("🐉 HYDRA — Swarm Intelligence Engine"))}`,
 		});
 		this.#queryText = new TextRenderable(this.#renderer, {
-			content: `Query: ${this.#query}`,
+			content: `Query: ${sanitizeForTerminal(this.#query)}`,
 		});
 		this.#phaseText = new TextRenderable(this.#renderer, {
 			content: "Phase: DECOMPOSING",
