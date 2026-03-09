@@ -408,6 +408,7 @@ describe("HydraPipeline", () => {
       );
 
       expect(loggedLines.some((line) => line.includes("\x1b"))).toBe(false);
+      expect(loggedLines.some((line) => line.includes("\r"))).toBe(false);
       expect(
         loggedLines.some((line) =>
           line.includes("[hydra] research agent failed for UnsafePersona:")),
@@ -416,6 +417,47 @@ describe("HydraPipeline", () => {
       console.error = originalConsoleError;
     }
   });
+
+  test("sanitizes upstream error payloads in research failure logs", async () => {
+    const originalConsoleError = console.error;
+    const loggedLines: string[] = [];
+    console.error = (...args: unknown[]) => {
+      loggedLines.push(String(args[0] ?? ""));
+    };
+
+    try {
+      const unsafePersona: PersonaConfig = {
+        id: "unsafe-error",
+        name: "Safe Persona",
+        description: "custom",
+        methodology: "custom method",
+      };
+      const harness = createHarness([
+        resolveStep(customDecomposeAssignmentsOutput([unsafePersona])),
+        rejectStep("boom\x1b[31mred\r\nnext"),
+      ]);
+
+      const pipeline = new HydraPipeline(
+        createPipelineConfig(1, false, 1),
+        { ...harness.deps, personas: [unsafePersona] },
+      );
+
+      await expect(pipeline.run("q")).rejects.toThrow(
+        "research phase failed: 0/1 agents succeeded",
+      );
+
+      expect(loggedLines.some((line) => line.includes("\x1b"))).toBe(false);
+      expect(loggedLines.some((line) => line.includes("\r"))).toBe(false);
+      expect(
+        loggedLines.some((line) =>
+          line.includes("[hydra] research agent failed for Safe Persona: boomred next"),
+        ),
+      ).toBe(true);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
 
   test("tolerates partial debate failures when at least two agents succeed", async () => {
     const harness = createHarness([

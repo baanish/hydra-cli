@@ -100,7 +100,9 @@ function createPersistedErrorSummary(error: unknown, fallback: string): string {
 }
 
 function logProcessError(context: string, error: unknown): void {
-  console.error(`[hydra] ${sanitizeForTerminal(context)}`, error);
+  const sanitizedContext = sanitizeForTerminal(context);
+  const sanitizedError = formatErrorMessage(error);
+  console.error(`[hydra] ${sanitizedContext} ${sanitizedError}`.trim());
 }
 
 /** orchestrates a full hydra run across decomposition, research, debate, and synthesis. */
