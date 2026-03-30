@@ -860,8 +860,12 @@ export class HydraPipeline extends EventEmitter {
 			} satisfies DecomposedAssignment;
 		});
 
-		if (assignments.some((item) => item === null)) {
-			return [];
+		const discardedAssignments =
+			assignments.length - assignments.filter(Boolean).length;
+		if (discardedAssignments > 0) {
+			console.warn(
+				`[hydra] discarded ${discardedAssignments} invalid decomposition assignment(s)`,
+			);
 		}
 
 		return assignments.filter(

@@ -266,22 +266,20 @@ export function loadConfig(overrides: HydraConfigFile = {}): HydraConfig {
 /** persist config values and return normalized merged config. */
 export function writeConfig(updates: HydraConfigFile): HydraConfig {
 	ensureConfigDir();
-	const fileData = {
+	const normalized = normalizeConfig({
+		...DEFAULTS,
 		...readConfigFile(),
 		...updates,
-	};
+	});
 
-	writeFileSync(CONFIG_FILE, JSON.stringify(fileData, null, 2), {
+	writeFileSync(CONFIG_FILE, JSON.stringify(normalized, null, 2), {
 		encoding: "utf8",
 		mode: 0o600,
 	});
 	// Explicit chmod ensures 0o600 regardless of umask.
 	chmodSync(CONFIG_FILE, 0o600);
 
-	return normalizeConfig({
-		...DEFAULTS,
-		...fileData,
-	});
+	return normalized;
 }
 
 /** mask api-like values for display to avoid accidental leakage in logs. */

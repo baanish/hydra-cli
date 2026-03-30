@@ -7,6 +7,8 @@ hydra is a multi-agent research and synthesis cli that breaks a question into sp
 - node `>=24`
 - npm `>=11`
 
+the `engines` field in `package.json` enforces `"node": ">=24"`. this migration is intentionally node-24-first: the cli now relies on modern node esm behavior, built-in web platform primitives like `fetch`/`Request`/`Response`, and the runtime shape we verified for the node http-to-fetch web adapter. older node versions are not tested in this phase, so treat them as unsupported until compatibility is widened deliberately.
+
 ## install and run
 
 ### one-off with npx
@@ -46,7 +48,7 @@ to quickly see a full real run output (the bundled ai transition 2036 retrospect
 ```bash
 cat examples/ai-transition-2036.json | jq -r '.brief'
 # no jq:
-node -e "console.log(JSON.parse(require('node:fs').readFileSync('./examples/ai-transition-2036.json', 'utf8')).brief)"
+node --input-type=module -e "import { readFile } from 'node:fs/promises'; console.log(JSON.parse(await readFile('./examples/ai-transition-2036.json', 'utf8')).brief)"
 ```
 
 ## storage

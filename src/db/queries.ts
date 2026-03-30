@@ -498,12 +498,13 @@ export function markRunComplete(runId: string, brief: string): RunRecord {
 	if (!run) {
 		throw new Error(`Run ${runId} not found`);
 	}
+	const completedAt = Date.now();
 
 	return updateRunStatus(runId, {
 		status: "complete",
 		brief,
-		completedAt: Date.now(),
-		elapsedMs: Date.now() - run.createdAt,
+		completedAt,
+		elapsedMs: completedAt - run.createdAt,
 		error: null,
 	});
 }

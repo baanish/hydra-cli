@@ -11,6 +11,7 @@ describe("compiled cli smoke test", () => {
 		const build = spawnSync(npmCommand(), ["run", "build"], {
 			cwd: process.cwd(),
 			encoding: "utf8",
+			timeout: 120_000,
 		});
 
 		expect(build.status, build.stderr).toBe(0);
@@ -18,6 +19,7 @@ describe("compiled cli smoke test", () => {
 		const result = spawnSync(process.execPath, ["dist/index.js", "--help"], {
 			cwd: process.cwd(),
 			encoding: "utf8",
+			timeout: 120_000,
 		});
 
 		expect(result.status, result.stderr).toBe(0);

@@ -984,7 +984,6 @@ async function toWebRequest(
 	}
 
 	const abortController = new AbortController();
-	req.once("aborted", () => abortController.abort());
 	req.once("close", () => {
 		if (!req.complete) {
 			abortController.abort();
