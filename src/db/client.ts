@@ -1,7 +1,7 @@
-import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { CONFIG_DIR } from "../config";
+import Database from "better-sqlite3";
+import { CONFIG_DIR } from "../config.js";
 
 const DB_DIR = CONFIG_DIR;
 const DB_PATH = resolve(DB_DIR, "hydra.db");
@@ -41,64 +41,66 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 CREATE INDEX IF NOT EXISTS idx_agent_runs_run_id ON agent_runs(run_id);
 `;
 
-let db: Database | null = null;
+type SqliteDatabase = InstanceType<typeof Database>;
+
+let db: SqliteDatabase | null = null;
 
 function ensureDbDir() {
-  if (!existsSync(DB_DIR)) {
-    mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
-  }
+	if (!existsSync(DB_DIR)) {
+		mkdirSync(DB_DIR, { recursive: true, mode: 0o700 });
+	}
 }
 
 function enforceDatabaseFilePermissions() {
-  const filePaths = [DB_PATH, `${DB_PATH}-wal`, `${DB_PATH}-shm`];
-  for (const path of filePaths) {
-    if (!existsSync(path)) {
-      continue;
-    }
-    try {
-      chmodSync(path, 0o600);
-    } catch (error) {
-      if (path === DB_PATH) {
-        const message =
-          error instanceof Error ? error.message : "unknown permission error";
-        console.warn(
-          `[hydra] warning: could not set permissions on ${DB_PATH}: ${message}`,
-        );
-      }
-      // Ignore chmod failures for transient sqlite sidecar files.
-    }
-  }
+	const filePaths = [DB_PATH, `${DB_PATH}-wal`, `${DB_PATH}-shm`];
+	for (const path of filePaths) {
+		if (!existsSync(path)) {
+			continue;
+		}
+		try {
+			chmodSync(path, 0o600);
+		} catch (error) {
+			if (path === DB_PATH) {
+				const message =
+					error instanceof Error ? error.message : "unknown permission error";
+				console.warn(
+					`[hydra] warning: could not set permissions on ${DB_PATH}: ${message}`,
+				);
+			}
+			// Ignore chmod failures for transient sqlite sidecar files.
+		}
+	}
 }
 
-function initializeSchema(database: Database) {
-  database.exec("PRAGMA foreign_keys = ON;");
-  database.exec("PRAGMA journal_mode = WAL;");
-  database.exec(SCHEMA_SQL);
+function initializeSchema(database: SqliteDatabase) {
+	database.exec("PRAGMA foreign_keys = ON;");
+	database.exec("PRAGMA journal_mode = WAL;");
+	database.exec(SCHEMA_SQL);
 }
 
 /** return fully qualified path to the sqlite database file. */
 export function getDatabasePath(): string {
-  return DB_PATH;
+	return DB_PATH;
 }
 
 /** get initialized singleton sqlite connection with required pragmas applied. */
-export function getDatabase(): Database {
-  if (db) {
-    return db;
-  }
+export function getDatabase(): SqliteDatabase {
+	if (db) {
+		return db;
+	}
 
-  ensureDbDir();
-  const database = new Database(DB_PATH);
-  initializeSchema(database);
-  enforceDatabaseFilePermissions();
-  db = database;
-  return db;
+	ensureDbDir();
+	const database = new Database(DB_PATH);
+	initializeSchema(database);
+	enforceDatabaseFilePermissions();
+	db = database;
+	return db;
 }
 
 /** close singleton database connection and clear in-memory handle. */
 export function closeDatabase() {
-  if (db) {
-    db.close();
-    db = null;
-  }
+	if (db) {
+		db.close();
+		db = null;
+	}
 }

@@ -10,10 +10,10 @@ import {
 	t,
 	yellow,
 } from "@opentui/core";
-import { getRunAgentRuns } from "../db/queries";
-import { ETAEstimator, formatDuration } from "../engine/eta";
-import { sanitizeForTerminal } from "../security";
-import type { AgentPhase, PipelineEvent, RunStatus } from "../types";
+import { getRunAgentRuns } from "../db/queries.js";
+import { ETAEstimator, formatDuration } from "../engine/eta.js";
+import { sanitizeForTerminal } from "../security.js";
+import type { AgentPhase, PipelineEvent, RunStatus } from "../types.js";
 import {
 	DB_SYNC_INTERVAL_MS,
 	PHASE_SPINNER,
@@ -21,7 +21,7 @@ import {
 	RUNNING_SPINNER,
 	UI_REFRESH_INTERVAL_MS,
 	spinnerFrameAt,
-} from "./animations";
+} from "./animations.js";
 
 interface HydraUIOptions {
 	concurrency: number;
