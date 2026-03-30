@@ -1,5 +1,5 @@
-import { Database } from "bun:sqlite";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import Database from "better-sqlite3";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS runs (
@@ -36,89 +36,84 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 CREATE INDEX IF NOT EXISTS idx_agent_runs_run_id ON agent_runs(run_id);
 `;
 
-let db: Database;
+let db: InstanceType<typeof Database>;
 let idCounter = 0;
 const originalDateNow = Date.now;
 
-mock.module("./client", () => ({
-  getDatabase: () => db,
+vi.doMock("./client.js", () => ({
+	getDatabase: () => db,
 }));
 
-mock.module("nanoid", () => ({
-  nanoid: () => `id-${++idCounter}`,
+vi.doMock("nanoid", () => ({
+	nanoid: () => `id-${++idCounter}`,
 }));
 
-const {
-  createRun,
-  getRun,
-  listRuns,
-  markRunComplete,
-  markRunFailed,
-} = await import("./queries");
+const { createRun, getRun, listRuns, markRunComplete, markRunFailed } =
+	await import("./queries.js");
 
 beforeEach(() => {
-  let now = 1_000_000;
-  Date.now = () => now++;
+	let now = 1_000_000;
+	Date.now = () => now++;
 
-  idCounter = 0;
-  db = new Database(":memory:");
-  db.exec("PRAGMA foreign_keys = ON;");
-  db.exec(SCHEMA_SQL);
+	idCounter = 0;
+	db = new Database(":memory:");
+	db.exec("PRAGMA foreign_keys = ON;");
+	db.exec(SCHEMA_SQL);
 });
 
 afterEach(() => {
-  Date.now = originalDateNow;
-  db.close();
+	Date.now = originalDateNow;
+	db.close();
 });
 
 describe("db/queries", () => {
-  test("createRun persists and getRun fetches by id", () => {
-    const created = createRun({
-      query: "what changed?",
-      agentCount: 4,
-      pipelineState: "{}",
-    });
+	test("createRun persists and getRun fetches by id", () => {
+		const created = createRun({
+			query: "what changed?",
+			agentCount: 4,
+			pipelineState: "{}",
+		});
 
-    const fetched = getRun(created.id);
-    expect(fetched).not.toBeNull();
-    expect(fetched?.id).toBe(created.id);
-    expect(fetched?.query).toBe("what changed?");
-    expect(fetched?.agentCount).toBe(4);
-    expect(fetched?.status).toBe("decomposing");
-  });
+		const fetched = getRun(created.id);
+		expect(fetched).not.toBeNull();
+		expect(fetched?.id).toBe(created.id);
+		expect(fetched?.query).toBe("what changed?");
+		expect(fetched?.agentCount).toBe(4);
+		expect(fetched?.status).toBe("decomposing");
+	});
 
-  test("markRunComplete stores brief, status, and elapsed", () => {
-    const run = createRun({ query: "q", agentCount: 2 });
-    const completed = markRunComplete(run.id, "final brief");
+	test("markRunComplete stores brief, status, and elapsed", () => {
+		const run = createRun({ query: "q", agentCount: 2 });
+		const completed = markRunComplete(run.id, "final brief");
 
-    expect(completed.status).toBe("complete");
-    expect(completed.brief).toBe("final brief");
-    expect(completed.error).toBeNull();
-    expect(typeof completed.elapsedMs).toBe("number");
-    expect(completed.elapsedMs).toBeGreaterThanOrEqual(0);
-  });
+		expect(completed.status).toBe("complete");
+		expect(completed.brief).toBe("final brief");
+		expect(completed.error).toBeNull();
+		expect(typeof completed.elapsedMs).toBe("number");
+		expect(completed.elapsedMs).toBeGreaterThanOrEqual(0);
+	});
 
-  test("markRunFailed stores error and status", () => {
-    const run = createRun({ query: "q", agentCount: 2 });
-    const failed = markRunFailed(run.id, "kaboom");
+	test("markRunFailed stores error and status", () => {
+		const run = createRun({ query: "q", agentCount: 2 });
+		const failed = markRunFailed(run.id, "kaboom");
 
-    expect(failed.status).toBe("error");
-    expect(failed.error).toBe("kaboom");
-    expect(typeof failed.elapsedMs).toBe("number");
-    expect(failed.elapsedMs).toBeGreaterThanOrEqual(0);
-  });
+		expect(failed.status).toBe("error");
+		expect(failed.error).toBe("kaboom");
+		expect(typeof failed.elapsedMs).toBe("number");
+		expect(failed.elapsedMs).toBeGreaterThanOrEqual(0);
+	});
 
-  test("listRuns returns newest-first and honors limit", () => {
-    const first = createRun({ query: "first", agentCount: 1 });
-    const second = createRun({ query: "second", agentCount: 1 });
-    const third = createRun({ query: "third", agentCount: 1 });
+	test("listRuns returns newest-first and honors limit", () => {
+		const first = createRun({ query: "first", agentCount: 1 });
+		const second = createRun({ query: "second", agentCount: 1 });
+		const third = createRun({ query: "third", agentCount: 1 });
 
-    const listed = listRuns(2);
-    expect(listed).toHaveLength(2);
-    expect(listed.map((run) => run.id)).toEqual([third.id, second.id]);
+		const listed = listRuns(2);
+		expect(listed).toHaveLength(2);
+		expect(listed.map((run) => run.id)).toEqual([third.id, second.id]);
 
-    // sanity check that oldest exists when requesting more rows
-    const all = listRuns(10);
-    expect(all.map((run) => run.id)).toContain(first.id);
-  });
+		// sanity check that oldest exists when requesting more rows
+		const all = listRuns(10);
+		expect(all.map((run) => run.id)).toContain(first.id);
+	});
 });

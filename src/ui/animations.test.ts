@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
 import spinners from "unicode-animations";
+import { describe, expect, test } from "vitest";
 
-import { spinnerFrameAt } from "./animations";
+import { spinnerFrameAt } from "./animations.js";
 
 describe("spinnerFrameAt", () => {
 	test("returns the first frame at zero elapsed time", () => {

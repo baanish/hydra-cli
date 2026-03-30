@@ -1,13 +1,37 @@
 # hydra-cli
 
-hydra-cli is a multi-agent research and synthesis CLI that breaks a query into specialist workstreams, runs parallel research plus debate rounds, and produces one consolidated synthesis. it is designed for long-form, evidence-oriented questions where a single model answer is too shallow.
+hydra is a multi-agent research and synthesis cli that breaks a question into specialist workstreams, runs parallel research plus debate rounds, and produces one consolidated synthesis. it is built for long-form, evidence-oriented questions where a single-model answer is too shallow.
 
-## install
+## requirements
+
+- node `>=24`
+- npm `>=11`
+
+the `engines` field in `package.json` enforces `"node": ">=24"`. this migration is intentionally node-24-first: the cli now relies on modern node esm behavior, built-in web platform primitives like `fetch`/`Request`/`Response`, and the runtime shape we verified for the node http-to-fetch web adapter. older node versions are not tested in this phase, so treat them as unsupported until compatibility is widened deliberately.
+
+## install and run
+
+### one-off with npx
 
 ```bash
-bun install
-bun link
+npx @baanish/hydra-cli --help
+npx @baanish/hydra-cli run "market entry strategy for industrial batteries"
+```
+
+### project-local install
+
+```bash
+npm install @baanish/hydra-cli
+npx hydra --help
+npx hydra run "market entry strategy for industrial batteries"
+```
+
+### global install
+
+```bash
+npm install -g @baanish/hydra-cli
 hydra --help
+hydra run "market entry strategy for industrial batteries"
 ```
 
 ## quick start
@@ -19,25 +43,33 @@ hydra config set synthetic-api-key <key>
 hydra run "your query"
 ```
 
-to quickly see a full real run output (the bundled AI transition 2036 retrospective) without running anything:
+to quickly see a full real run output (the bundled ai transition 2036 retrospective) without running anything:
 
 ```bash
 cat examples/ai-transition-2036.json | jq -r '.brief'
 # no jq:
-node -e "console.log(require('./examples/ai-transition-2036.json').brief)"
+node --input-type=module -e "import { readFile } from 'node:fs/promises'; console.log(JSON.parse(await readFile('./examples/ai-transition-2036.json', 'utf8')).brief)"
 ```
+
+## storage
+
+hydra keeps the same on-disk locations across install modes:
+
+- config: `~/.config/hydra-cli/config.json`
+- database: `~/.config/hydra-cli/hydra.db`
+- personas: `~/.config/hydra-cli/personas.json`
 
 ## key commands
 
 | command | purpose | example |
 | --- | --- | --- |
 | `hydra run <query>` | start a run (also supports `hydra "<query>"`) | `hydra run "market entry strategy"` |
-| `hydra run --custom-personas-only <query>` | use custom personas only (fill missing personas with ephemeral generated ones) | `hydra run --custom-personas-only --agents 5 "supply chain strategy"` |
+| `hydra run --custom-personas-only <query>` | use custom personas only and fill any shortfall with ephemeral generated personas | `hydra run --custom-personas-only --agents 5 "supply chain strategy"` |
 | `hydra view <run-id>` | inspect a run summary | `hydra view Rw9k...` |
 | `hydra history` | list recent runs | `hydra history --limit 20` |
 | `hydra config show` | print effective config with masked keys | `hydra config show` |
 | `hydra config set <key> <value>` | update a config value | `hydra config set max-concurrency 5` |
-| `hydra web` | launch local web UI with an authenticated local API session | `hydra web --port 3737` |
+| `hydra web` | launch the local web ui with an authenticated local api session | `hydra web --port 3737` |
 
 ## personas
 
@@ -47,7 +79,7 @@ personas are specialist analytical lenses assigned to agents (for example `skept
 | --- | --- | --- |
 | `hydra persona list` | list all personas (built-in + custom) | `hydra persona list` |
 | `hydra persona list --json` | output personas as json | `hydra persona list --json` |
-| `hydra persona add` | add a custom persona | `hydra persona add --name "The Lawyer" --description "Applies legal reasoning and precedent." --methodology "case law analysis"` |
+| `hydra persona add` | add a custom persona | `hydra persona add --name "the lawyer" --description "applies legal reasoning and precedent." --methodology "case law analysis"` |
 | `hydra persona remove <id>` | remove a custom persona | `hydra persona remove the-lawyer` |
 
 custom personas are stored in `~/.config/hydra-cli/personas.json`. built-in personas cannot be removed. if `--id` is not provided when adding a persona, it is auto-derived from the name using slugification.
@@ -69,6 +101,22 @@ custom personas are stored in `~/.config/hydra-cli/personas.json`. built-in pers
 | `searchEnabled` | `boolean` | `true` |
 | `customPersonasOnly` | `boolean` | `false` |
 
+## development
+
+```bash
+npm install
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+manual first publish:
+
+```bash
+npm publish --access public
+```
+
 ## note on backend
 
-hydra-cli uses Synthetic.new as the default OpenAI-compatible LLM backend (`baseUrl` + model defaults target Synthetic.new). `baseUrl` must use `https://`, or `http://` only for localhost / loopback development endpoints, and embedded URL credentials are rejected.
+hydra uses synthetic.new as the default openai-compatible llm backend (`baseUrl` + model defaults target synthetic.new). `baseUrl` must use `https://`, or `http://` only for localhost / loopback development endpoints, and embedded url credentials are rejected.

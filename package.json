@@ -1,50 +1,59 @@
 {
-  "name": "hydra-swarm",
-  "version": "0.1.0",
-  "description": "Multi-model swarm intelligence engine for your terminal",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/baanish/hydra-cli.git"
-  },
-  "type": "module",
-  "bin": {
-    "hydra": "./src/index.ts"
-  },
-  "scripts": {
-    "dev": "bun run src/index.ts",
-    "start": "bun run src/index.ts",
-    "test": "bun test",
-    "build": "bun build src/index.ts --compile --outfile dist/hydra",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src/",
-    "format": "biome format --write src/"
-  },
-  "dependencies": {
-    "@opentui/core": "^0.1.81",
-    "commander": "^13.1.0",
-    "nanoid": "^5.1.5",
-    "openai": "^4.83.0",
-    "unicode-animations": "^1.0.3"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
-    "@types/bun": "latest",
-    "typescript": "^5.7.3"
-  },
-  "keywords": [
-    "cli",
-    "ai",
-    "swarm",
-    "multi-agent",
-    "research",
-    "intelligence",
-    "llm",
-    "tui",
-    "opentui"
-  ],
-  "author": "Aanish Bhirud",
-  "license": "MIT",
-  "engines": {
-    "bun": ">=1.1.0"
-  }
+	"name": "@baanish/hydra-cli",
+	"version": "0.1.0",
+	"description": "Multi-model swarm intelligence engine for your terminal",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/baanish/hydra-cli.git"
+	},
+	"type": "module",
+	"bin": {
+		"hydra": "./dist/index.js"
+	},
+	"scripts": {
+		"dev": "tsx src/index.ts",
+		"start": "tsx src/index.ts",
+		"test": "vitest run",
+		"build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs",
+		"typecheck": "tsc --noEmit",
+		"lint": "biome check src scripts README.md package.json tsconfig.json tsconfig.build.json vitest.config.ts .github",
+		"format": "biome format --write src scripts README.md package.json tsconfig.json tsconfig.build.json vitest.config.ts .github",
+		"prepack": "npm run build"
+	},
+	"dependencies": {
+		"@opentui/core": "^0.1.81",
+		"better-sqlite3": "^12.8.0",
+		"commander": "^13.1.0",
+		"nanoid": "^5.1.5",
+		"openai": "^4.83.0",
+		"unicode-animations": "^1.0.3"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^1.9.4",
+		"@types/better-sqlite3": "^7.6.13",
+		"@types/node": "^24.5.2",
+		"tsx": "^4.20.5",
+		"typescript": "^5.7.3",
+		"vitest": "^3.2.4"
+	},
+	"keywords": [
+		"cli",
+		"ai",
+		"swarm",
+		"multi-agent",
+		"research",
+		"intelligence",
+		"llm",
+		"tui",
+		"opentui"
+	],
+	"author": "Aanish Bhirud",
+	"license": "MIT",
+	"engines": {
+		"node": ">=24"
+	},
+	"files": ["dist", "README.md", "LICENSE"],
+	"publishConfig": {
+		"access": "public"
+	}
 }
